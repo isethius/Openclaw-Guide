@@ -174,32 +174,89 @@ sudo dpkg-reconfigure -plow unattended-upgrades
 
 ---
 
-## Step 10: Install Tailscale (3 min)
+## Step 10: Set Up Tailscale (5 min)
 
-Tailscale gives you a private, encrypted connection to your server from anywhere.
+Tailscale creates a private encrypted network between your devices. Without it, you'd need to keep SSH open to the public internet (risky). With Tailscale, your server is invisible to everyone except your devices.
 
-**On your VPS:**
+### 10a: Create a Tailscale Account
+
+1. Go to https://login.tailscale.com/start
+2. Sign up with **Google** or **GitHub** (whichever you prefer)
+3. You'll land on the Tailscale admin console — leave this tab open
+
+### 10b: Install Tailscale on Your VPS
+
+SSH into your server (still using the public IP for now):
+
+```powershell
+ssh openclaw@YOUR_PUBLIC_IP
+```
+
+Then install and connect:
+
 ```bash
+# Install Tailscale
 curl -fsSL https://tailscale.com/install.sh | sh
+
+# Start Tailscale — this prints a login URL
 sudo tailscale up
 ```
 
-Open the URL it shows → log in with Google/GitHub → authorize.
-
-Your server now has a private IP like `100.x.y.z`.
-
-**On your Windows PC:**
-1. Download Tailscale from https://tailscale.com/download/windows
-2. Install and log in with the **same account**
-3. Your PC and VPS are now on a private network
-
-From now on, connect using the Tailscale IP:
-```powershell
-ssh openclaw@100.x.y.z
+You'll see something like:
+```
+To authenticate, visit:
+https://login.tailscale.com/a/abc123def456
 ```
 
----
+**Copy that URL** → open it in your browser → click **Connect**. Your server is now on your private network.
 
+Get your server's Tailscale IP:
+```bash
+tailscale ip -4
+# Shows something like: 100.64.0.2
+```
+
+**Write this IP down** — you'll use it instead of the public IP from now on.
+
+### 10c: Install Tailscale on Your Windows PC
+
+1. Download from https://tailscale.com/download/windows
+2. Run the installer → follow prompts
+3. Tailscale appears in your system tray (bottom-right, near the clock)
+4. Click the icon → **Log in** → sign in with the **same account** from step 10a
+5. It should say **Connected** with a green dot
+
+### 10d: Test the Private Connection
+
+Open a **new Windows Terminal** and SSH using the Tailscale IP:
+
+```powershell
+ssh openclaw@100.64.0.2
+# (use YOUR Tailscale IP from step 10b)
+```
+
+If it connects, you're golden. **From now on, always use this IP to connect.**
+
+### 10e: (Optional) Disable Public SSH
+
+Now that Tailscale works, you can block SSH from the public internet entirely:
+
+```bash
+# On your VPS — remove the public SSH rule and only allow Tailscale
+sudo ufw delete allow ssh
+sudo ufw allow in on tailscale0 to any port 22
+sudo ufw reload
+```
+
+After this, the ONLY way to SSH in is through Tailscale. Much safer.
+
+### 10f: Install Tailscale on Your Phone (Optional)
+
+1. Install Tailscale from App Store (iOS) or Play Store (Android)
+2. Log in with the same account
+3. Now you can SSH from your phone too (using apps like Termius)
+
+---
 ## Step 11: Run OpenClaw as a Service (3 min)
 
 Set up systemd so OpenClaw runs 24/7 and auto-restarts:
