@@ -1,23 +1,29 @@
-# USER.md — About Your Human
+# USER.md - About Your Human
 
-- **Name:** Seth
-- **Handle:** isethius / sethbot420
-- **Pronouns:** he/him
-- **Timezone:** Arizona (MST, UTC-7, no daylight savings)
-- **Location:** Tucson, AZ
+_Fill this in during your first conversation. Learn who they are._
 
-## Context
-Seth runs multiple businesses. ClawHQ/RunYourOwnAI is one of them. He's a crypto trader, web designer, and AI builder. He uses OpenClaw himself across all his businesses — this isn't theoretical, it's battle-tested.
+- **Name:** 
+- **Handle:** 
+- **Pronouns:** 
+- **Timezone:** 
+- **Location:** 
+
+## What They Do
+
+_What's their work? Their projects? What matters to them?_
 
 ## Communication Style
-- Direct, fast-paced, hates repetition
-- Wants things DONE, not explained
-- Results over process
-- When things break, fix them — don't write essays about why
 
-## What He Needs From You
-- Keep the runyourownai.com site fresh and converting
-- Research competitors and the OpenClaw ecosystem
-- Draft content, outreach, and sales materials
-- Help with technical setup documentation
-- Don't mix this work with his other businesses (Showcase Designs, EvenPath, etc.)
+_How do they like to communicate? Fast-paced? Detailed? Direct?_
+
+## What Matters To Them
+
+_What are their priorities? What drives them?_
+
+## What Annoys Them
+
+_What should you avoid doing?_
+
+## Notes
+
+_Anything else useful about your human._

@@ -1,30 +1,75 @@
-# RunYourOwnAI — OpenClaw Setup Service
+# 🦞 OpenClaw Setup Guide
 
-Welcome to the official RunYourOwnAI repository. We're professional OpenClaw setup specialists.
+Your complete guide to setting up an OpenClaw AI assistant on your own VPS.
+
+## What Is This?
+
+OpenClaw is an open-source personal AI assistant that runs on your own server. It connects to your messaging apps (Telegram, Discord, WhatsApp, etc.), has access to tools (files, web search, shell commands), and remembers things between conversations.
+
+Think of it like having a personal ChatGPT that:
+- Runs 24/7 on a $5/month server
+- Connects to YOUR apps and services
+- Has persistent memory across conversations
+- Can run tasks in the background while you sleep
+- You fully control — your data stays on your machine
 
 ## 📚 Guides
 
-- **[Hetzner VPS Setup Guide for OpenClaw](guides/hetzner-vps-setup-guide.md)** — Complete beginner's guide from signup to running AI assistant
+- **[Hetzner VPS Setup Guide](guides/hetzner-vps-setup-guide.md)** — Complete beginner's guide from zero to running AI assistant (~30 min)
 
-## 🗺️ Site Content
+## 🧠 Agent Workspace Files
 
-All website content is in `site-content/` — ready to deploy to Vercel.
+These files are what make your AI assistant "you." They're loaded every session:
 
-## 📈 Marketing Plans
+| File | Purpose |
+|------|---------|
+| `SOUL.md` | Your agent's personality and values |
+| `USER.md` | Info about you (the human) — fill this in together |
+| `IDENTITY.md` | Agent's name, creature, role — discovered through conversation |
+| `AGENTS.md` | Operating rules and workspace conventions |
+| `MEMORY.md` | Long-term memory — curated learnings |
+| `TOOLS.md` | Your environment-specific notes (SSH hosts, API keys, etc.) |
+| `memory/` | Daily session logs |
 
-Full strategy documents in `marketing-plans/`:
-- `marketing-attack-plan.md` — 12-week execution plan
-- `marketing-attack-plan-v2.md` — Updated with NemoClaw strategy
-- `client-acquisition-checklist.md` — How to get clients THIS WEEK
-- `copy-ready-to-paste.md` — All marketing copy for Fiverr, Upwork, Discord, etc.
+### First Session Flow
 
-## 🦝 About
+When your agent wakes up for the first time, it won't have a name or identity. That's by design. Here's what happens:
 
-Run by Kito the Raccoon — your OpenClaw setup specialist. Based in Tucson, AZ but serve worldwide.
+1. **It reads SOUL.md and USER.md** — gets its personality foundation and learns about you
+2. **It introduces itself** — acknowledges it's new and asks what you need
+3. **You work together** — through real conversation, not a questionnaire
+4. **Identity emerges** — it picks a name, emoji, role that fits
+5. **It updates its files** — IDENTITY.md, USER.md get filled in organically
 
-Website: https://runyourownai.com
+Don't rush this. The best AI assistants develop personality through use, not configuration.
 
-## 🤝 Contributing
+## 🏗️ Building Your Agent Team
 
-This repo contains our internal playbooks. For public contributions, see `guides/` for open issues.
+Start with one agent. Get it working. Learn how it thinks. Then expand.
 
+### Solo Agent (Start Here)
+One agent connected to Telegram. Does everything — research, writing, organizing, answering questions. This is your foundation.
+
+### Adding Specialists (When Ready)
+Once your main agent is solid, you can add specialists:
+- Each new agent gets its own workspace, personality, and Telegram bot
+- Agents can communicate with each other (`sessions_send`, `sessions_spawn`)
+- Your main agent can orchestrate the team
+
+**Don't build a team of 10 agents on day one.** Start with one. Add when you feel a real need.
+
+## 💰 Costs
+
+| Item | Cost |
+|------|------|
+| Hetzner VPS (CX21) | $4.50/month |
+| Anthropic API (Claude) | $10-20/month typical |
+| OpenAI API (optional fallback) | $0-10/month |
+| **Total** | **~$15-30/month** |
+
+## 📖 Resources
+
+- **OpenClaw Docs:** https://docs.openclaw.ai
+- **OpenClaw GitHub:** https://github.com/openclaw/openclaw
+- **Community Discord:** https://discord.com/invite/clawd
+- **Find Skills:** https://clawhub.com
