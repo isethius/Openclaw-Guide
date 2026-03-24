@@ -7,7 +7,7 @@ Your complete guide to setting up an OpenClaw AI assistant on your own VPS.
 OpenClaw is an open-source personal AI assistant that runs on your own server. It connects to your messaging apps (Telegram, Discord, WhatsApp, etc.), has access to tools (files, web search, shell commands), and remembers things between conversations.
 
 Think of it like having a personal ChatGPT that:
-- Runs 24/7 on a $5/month server
+- Runs 24/7 on an ~$8/month server
 - Connects to YOUR apps and services
 - Has persistent memory across conversations
 - Can run tasks in the background while you sleep

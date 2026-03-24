@@ -5,17 +5,17 @@
 
 ## 📋 Overview
 
-We're setting up a $4.50/month VPS on Hetzner to run OpenClaw 24/7. Entire process ~30 minutes.
+We're setting up a $8/month VPS on Hetzner to run OpenClaw 24/7. Entire process ~30 minutes.
 
 **What you'll need:**
-- Credit/debit card (Hetzner charges ~$5/month)
+- Credit/debit card (Hetzner charges ~$8/month)
 - SSH key for security (I'll help you generate one)
 - Terminal access (Mac/Linux) or PuTTY (Windows)
 
 **Total monthly cost after setup:**
-- VPS: $4.50
+- VPS: $8 (CX32, 8GB RAM)
 - AI APIs (Anthropic/OpenAI): $10-15
-- **Total: ~$15/month**
+- **Total: ~$48/month**
 
 ---
 
@@ -81,8 +81,8 @@ In the project dashboard:
 2. **Choose Type:**
    - **Location:** Pick the closest to you (Falkenstein Germany or Nuremberg)
    - **Type:** **Shared CPU** (cheapest)
-   - **Plan:** **CX21** (2 vCPU, 4GB RAM, 40GB disk) — $4.50/month
-   - **Price:** ~$4.50/mo ( billed hourly)
+   - **Plan:** **CX32** (4 vCPU, 8GB RAM, 80GB disk) — ~$8/month
+   - **Price:** ~$8/mo (billed hourly)
    - Volume type: **Local** (fastest)
 
 3. **Add SSH Key:**
@@ -97,7 +97,7 @@ In the project dashboard:
    - `openclaw-server` or anything you like
 
 5. **Click "Create & Buy Now"**
-   - Review: Ubuntu 24.04, CX21, $4.50/mo
+   - Review: Ubuntu 24.04, CX32, ~$8/mo
    - Accept terms
    - Click **"Create Server"**
 
@@ -425,7 +425,7 @@ Go to your Telegram bot (or Discord channel), send:
 Hello! What can you do?
 ```
 
-Your AI should reply. If it does — **success**. You now have your own AI assistant running 24/7 on a $4.50 VPS.
+Your AI should reply. If it does — **success**. You now have your own AI assistant running 24/7 on an $8/mo VPS.
 
 ---
 
@@ -455,13 +455,13 @@ Your AI should reply. If it does — **success**. You now have your own AI assis
 ## 💰 ONGOING COSTS
 
 Monthly bill from Hetzner:
-- CX21 server: **$4.50** (billed hourly, max $4.50/mo)
+- CX32 server: **~$8** (billed hourly)
 - Backups ($1 optional): skip
 - Snapshots ($0.10/GB): skip
 
 API costs separate:
 - Anthropic: ~$8-20/month (depending on usage)
-- Total: ~$15/month for a fully functional AI assistant
+- Total: ~$48/month for a fully functional AI assistant
 
 ---
 
@@ -476,7 +476,7 @@ Contact Seth if anything's unclear. Or ask in the OpenClaw Discord:
 ## ⏱️ QUICK RECAP (15 min video script)
 
 1. Sign up for Hetzner Cloud → add payment
-2. Create Ubuntu 24.04 CX21 server → add SSH key
+2. Create Ubuntu 24.04 CX32 server → add SSH key
 3. SSH into server → create `openclaw` user → copy SSH key
 4. Install nvm → Node.js 22 → OpenClaw CLI
 5. Run `openclaw setup` → pick Anthropic → paste API key → Loopback mode
@@ -486,7 +486,7 @@ Contact Seth if anything's unclear. Or ask in the OpenClaw Discord:
 9. Set up Telegram bot: @BotFather → get token → `openclaw config set`
 10. Test PM2, test Telegram message
 
-Done. Server costs $4.50/mo, lives forever 24/7. AI costs extra.
+Done. Server costs ~$8/mo, lives forever 24/7. AI costs extra.
 
 ---
 
