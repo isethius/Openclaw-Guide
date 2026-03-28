@@ -28,6 +28,7 @@ We're setting up an $8/month VPS on Hetzner to run OpenClaw 24/7 with Tailscale 
 ## Before You Start — Non-Negotiable Rules
 
 - Never run OpenClaw as root
+- Never hardcode paths to Node or OpenClaw binaries — always use `which node`, `which openclaw`
 - Never expose ports publicly without auth
 - Never leave secrets in world-readable directories
 - Never paste API keys, Telegram bot tokens, or gateway auth tokens into chat windows, screenshots, or unencrypted notes
@@ -48,9 +49,9 @@ ls -la ~/.ssh/id_*.pub
 
 # If you see "No such file", create one:
 ssh-keygen -t ed25519 -C "you@example.com"
-# When prompted for a passphrase, enter a strong one (recommended)
-# This protects your key if your local machine is compromised
 ```
+
+**When it asks for a passphrase, set one.** A passphrase encrypts your private key so even if someone gets your laptop, they can't use the key without it. macOS Keychain remembers it after the first entry — you won't be typing it every time you connect.
 
 Copy your public key to clipboard:
 ```bash
@@ -207,22 +208,23 @@ sudo ufw enable
 
 Type `y` when prompted. SSH is now **only accessible via Tailscale** — invisible to the public internet.
 
-### Step 12: Disable Password Auth & Root Login
+### Step 12: Harden SSH Configuration
+
+Since your SSH key works, password-based login becomes unnecessary attack surface. Passwords can be brute-forced; keys practically can't.
 
 ```bash
-sudo nano /etc/ssh/sshd_config
-```
+# Disable password auth
+sudo sed -i 's/#PasswordAuthentication yes/PasswordAuthentication no/' /etc/ssh/sshd_config
+sudo sed -i 's/PasswordAuthentication yes/PasswordAuthentication no/' /etc/ssh/sshd_config
 
-Find and change (or add) these lines:
-```
-PasswordAuthentication no
-PermitRootLogin no
-```
+# Disable root login
+sudo sed -i 's/#PermitRootLogin yes/PermitRootLogin no/' /etc/ssh/sshd_config
+sudo sed -i 's/PermitRootLogin yes/PermitRootLogin no/' /etc/ssh/sshd_config
 
-Save (Ctrl+X → Y → Enter), then:
-```bash
 sudo systemctl restart sshd
 ```
+
+**Why `sed` instead of `nano`:** These one-liners find and replace exact settings in the SSH config file. With `nano` you're manually hunting through the file and one typo can break SSH entirely. These commands are copy-paste safe — they handle both commented and uncommented versions of each setting.
 
 ### Step 13: Install Fail2Ban
 
@@ -246,45 +248,41 @@ This covers OS packages. **Don't auto-update OpenClaw itself** — breaking chan
 
 ## 📦 PHASE 7: INSTALL OPENCLAW (10 min)
 
-### Step 15: Install Node.js v22
+### Step 15: Install OpenClaw with the Official Installer
+
+The official installer handles Node.js detection and installation automatically, then installs OpenClaw. This is the recommended path.
+
+OpenClaw requires Node 22 or newer. The installer will check for a compatible version and guide you if one isn't found.
 
 ```bash
-# Install nvm (Node Version Manager)
-curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash
-
-# Reload shell
-source ~/.bashrc
-
-# Install Node.js 22
-nvm install 22
-nvm use 22
-nvm alias default 22
-
-# Verify
-node --version
-# Should output: v22.x.x
-```
-
-### Step 16: Install OpenClaw
-
-```bash
-npm install -g openclaw
-
-# Verify
+curl -fsSL https://openclaw.ai/install.sh | bash
 openclaw --version
 ```
 
----
-
-## ⚙️ PHASE 8: RUN SETUP WIZARD
-
-### Step 17: Interactive Setup
+After the installer completes, verify Node is available:
 
 ```bash
-openclaw onboard
+node --version    # Should show v24.x.x or v22.x.x
+which node        # Record this path — you'll need it if you ever troubleshoot the service
 ```
 
-> **Note:** If `openclaw onboard` isn't available in your version, try `openclaw setup` or check `openclaw --help` for the current guided setup command. If your version supports `--install-daemon`, use `openclaw onboard --install-daemon` to set up the systemd service automatically.
+> **If the installer can't find or install Node**, or if you prefer to manage Node yourself, see **Appendix B: Manual Node.js Installation** at the bottom of this guide. Install Node first, then re-run the installer above.
+
+> **Why not `npm install -g openclaw`?** That still works, but using the official installer for both install and update means you don't have a mismatch between how it was installed and how it gets upgraded later. If you do use npm, the guide still works — just keep your update commands consistent (see the Update Procedure section).
+
+---
+
+## ⚙️ PHASE 8: SETUP WIZARD + FIRST TEST
+
+### Step 16: Interactive Setup
+
+```bash
+openclaw onboard --install-daemon
+```
+
+**What `--install-daemon` does:** This runs the interactive setup wizard AND installs the background service (daemon) in one step. The flag tells OpenClaw to configure a user-level systemd service that starts automatically and survives reboots — so you don't have to hand-wire systemd later.
+
+> **Note:** If `--install-daemon` isn't recognized in your version, run `openclaw onboard` by itself (or try `openclaw setup`). Check `openclaw --help` for available flags. You'll handle the service manually in Phase 10 if the flag isn't available.
 
 The wizard will ask:
 
@@ -308,7 +306,7 @@ The wizard will ask:
 **5. Channel:**
 - Choose **Telegram** (easiest to start)
 
-### Step 18: Validate Directly on the VPS
+### Step 17: Validate Directly on the VPS
 
 **Before connecting Telegram, the dashboard, or any other integration — validate the base install works locally on the VPS first.**
 
@@ -338,7 +336,7 @@ Fix anything flagged before continuing.
 
 **Do this immediately after setup, before starting the service.** The setup wizard stores API keys and tokens directly in `openclaw.json` as plaintext. On a hardened setup, that's not acceptable — anyone who can read the file sees every credential.
 
-### Step 19: Lock File Permissions
+### Step 18: Lock File Permissions
 
 ```bash
 chmod 700 ~/.openclaw
@@ -349,9 +347,15 @@ chmod 600 ~/.openclaw/secrets/* 2>/dev/null
 
 `700` means only the `openclaw` user can read, write, or list files. Everyone else gets "Permission denied."
 
-### Step 20: Migrate Secrets Out of Plaintext Config
+### Step 19: Migrate Secrets Out of Plaintext Config
 
 OpenClaw supports **SecretRefs** — a mechanism where secrets are stored separately and referenced in config using a structured object instead of plaintext strings. This is the production default, not an optional extra.
+
+**The hierarchy is:**
+
+1. **SecretRefs** — use these for all supported credentials (API keys, tokens). This is the documented default for production.
+2. **Environment variable fallback** — use only where the docs explicitly support it (e.g., `TELEGRAM_BOT_TOKEN` for the default Telegram account).
+3. **Plaintext in JSON** — last resort, only if your installed version doesn't support SecretRefs yet.
 
 **The documented secrets workflow:**
 
@@ -380,7 +384,19 @@ openclaw doctor
 
 > **Note:** The plan file path (`/tmp/openclaw-secrets-plan.json`) is what current docs show. If `openclaw secrets configure` outputs a different path, use that instead — the command will tell you where the plan was saved.
 
-> **Version note:** If `openclaw secrets` commands aren't available in your installed version, the `chmod` lockdown from Step 19 is your primary protection. Check https://docs.openclaw.ai/gateway/secrets for your version's capabilities.
+> **Version note:** If `openclaw secrets` commands aren't available in your installed version, the `chmod` lockdown from Step 18 is your primary protection. Check https://docs.openclaw.ai/gateway/secrets for your version's capabilities.
+
+The documented SecretRef object shape looks like this:
+
+```json
+{
+  "source": "env",
+  "provider": "default",
+  "id": "OPENAI_API_KEY"
+}
+```
+
+That structured form should be used wherever the docs support SecretRefs — don't use shorthand or placeholder syntax.
 
 After migration, manually inspect `~/.openclaw/openclaw.json` and confirm **no plaintext tokens remain**. The config should contain SecretRef objects pointing to your stored secrets, not the secrets themselves.
 
@@ -390,14 +406,16 @@ After migration, manually inspect `~/.openclaw/openclaw.json` and confirm **no p
 
 OpenClaw runs as a **systemd user service** — auto-restarts on crashes, starts on boot.
 
-### Step 21: Start the Gateway
+> **If you used `openclaw onboard --install-daemon` in Step 16**, the service may already be running. Check with `systemctl --user status openclaw-gateway.service` — if it shows `active (running)`, skip to `loginctl enable-linger` below and move on.
+
+### Step 20: Start the Gateway
 
 ```bash
 openclaw gateway restart
 systemctl --user status openclaw-gateway.service --no-pager | head -n 25
 ```
 
-If `systemctl --user` fails in your SSH session:
+If `systemctl --user` fails in your SSH session (common issue — systemd doesn't always set up user sessions over SSH):
 ```bash
 export XDG_RUNTIME_DIR="/run/user/$(id -u)"
 export DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$(id -u)/bus"
@@ -409,7 +427,9 @@ Make it survive logouts:
 loginctl enable-linger openclaw
 ```
 
-### Step 22: Check Logs
+> **If the built-in service commands don't work** (older version, broken install, custom requirements), see **Appendix A: Manual systemd Service** at the bottom of this guide.
+
+### Step 21: Check Logs
 
 ```bash
 LATEST="$(ls -t /tmp/openclaw/openclaw-*.log 2>/dev/null | head -1)"
@@ -422,7 +442,7 @@ tail -n 120 "$LATEST" | egrep -i 'telegram|pair|401|auth|error|listening'
 
 Tailscale protects the network layer — only your devices can reach the server. Gateway auth adds a second lock at the application layer. If someone gets onto your tailnet (compromised device, shared account), they still can't control your agent without the auth token. Defense in depth.
 
-### Step 23: Generate and Set the Auth Token
+### Step 22: Generate and Set the Auth Token
 
 ```bash
 # Generate a strong random token
@@ -432,13 +452,14 @@ openssl rand -hex 32
 Copy the output and configure it:
 
 ```bash
+openclaw config set gateway.auth.mode token
 openclaw config set gateway.auth.token "YOUR_TOKEN_HERE"
 openclaw gateway restart
 ```
 
-> **Version note:** If `gateway.auth.token` doesn't work as the config key path, check https://docs.openclaw.ai/gateway/authentication for your installed version's exact syntax. Older versions may use `gateway.authToken`. Run `openclaw config get gateway` after setting to confirm it took.
+> **Version note:** If `gateway.auth.mode` or `gateway.auth.token` don't work as config key paths, check https://docs.openclaw.ai/gateway/authentication for your installed version's exact syntax. Older versions may use `gateway.authToken`. Run `openclaw config get gateway` after setting to confirm it took.
 
-### Step 24: Verify Auth Is Working (Negative Test)
+### Step 23: Verify Auth Is Working (Negative Test)
 
 Configuring the token isn't enough — you need to verify the gateway actually **rejects** unauthenticated access. This is the most important verification step.
 
@@ -462,7 +483,7 @@ If the probe succeeds without a token, the auth config didn't take — re-check 
 
 ## 📱 PHASE 12: CONNECT TELEGRAM
 
-### Step 25: Create a Telegram Bot
+### Step 24: Create a Telegram Bot
 
 1. Open Telegram, search for **@BotFather**
 2. Send `/newbot`
@@ -470,7 +491,7 @@ If the probe succeeds without a token, the auth config didn't take — re-check 
 4. Choose username: must end in `bot` (e.g., `myopenclawbot`)
 5. Copy the **Bot Token** — treat this like a password
 
-### Step 26: Configure Telegram in OpenClaw
+### Step 25: Configure Telegram in OpenClaw
 
 **First, check if the setup wizard already created a Telegram config:**
 
@@ -510,7 +531,7 @@ Restart the gateway:
 openclaw gateway restart
 ```
 
-### Step 27: Approve Your First Message
+### Step 26: Approve Your First Message
 
 Send any message to your bot in Telegram. You'll need to approve the pairing:
 
@@ -529,7 +550,7 @@ Now message your bot again — it should respond! 🎉
 
 ## ✅ PHASE 13: VERIFY EVERYTHING
 
-### Step 28: Run Diagnostics
+### Step 27: Run Diagnostics
 
 ```bash
 openclaw doctor
@@ -540,7 +561,7 @@ systemctl --user status openclaw-gateway.service --no-pager | head -n 25
 
 Fix anything flagged.
 
-### Step 29: Turn On Reasoning (CRITICAL)
+### Step 28: Turn On Reasoning (CRITICAL)
 
 This is the #1 setting people miss. Without it, your agent sounds shallow:
 
@@ -549,7 +570,7 @@ openclaw config set agents.defaults.thinkingDefault high
 openclaw gateway restart
 ```
 
-### Step 30: Reboot Test
+### Step 29: Reboot Test
 
 **"Installed" doesn't mean "working after reboot."** This is the most important test.
 
@@ -566,7 +587,7 @@ systemctl --user status openclaw-gateway.service --no-pager | head -n 25
 
 Send a Telegram message to your bot. If it responds, everything survived the reboot. If the service didn't come back, revisit Phase 10 — check linger, XDG_RUNTIME_DIR, and the systemd service.
 
-### Step 31: Take a Hetzner Snapshot
+### Step 30: Take a Hetzner Snapshot
 
 Capture the fully working state so you can roll back if a future update breaks things:
 
@@ -575,6 +596,32 @@ Capture the fully working state so you can roll back if a future update breaks t
 3. Click **Create Snapshot** → name it `post-setup-clean`
 
 Take additional snapshots before major OpenClaw updates or significant config changes.
+
+### Step 31: Create an Encrypted Backup
+
+Everything you just configured — API keys, Telegram tokens, gateway auth, agent settings — lives in `~/.openclaw/`. Back it up, encrypted, before moving on.
+
+```bash
+# Create compressed archive
+tar -czf ~/openclaw-backup-$(date +%Y%m%d).tar.gz ~/.openclaw
+
+# Encrypt it (set a password — remember it)
+openssl enc -aes-256-cbc -salt -pbkdf2 \
+  -in ~/openclaw-backup-$(date +%Y%m%d).tar.gz \
+  -out ~/openclaw-backup-$(date +%Y%m%d).enc
+
+# Remove the unencrypted version
+rm ~/openclaw-backup-$(date +%Y%m%d).tar.gz
+```
+
+Download the encrypted backup to your Mac:
+
+```bash
+# Run this on your Mac, not the server
+scp openclaw@YOUR_TAILSCALE_IP:~/openclaw-backup-*.enc ~/Desktop/
+```
+
+**Where to store it:** Don't leave it on your Desktop. Move it to a password manager's file storage, an encrypted drive, or an offline archive.
 
 ---
 
@@ -672,7 +719,7 @@ sudo systemctl restart sshd
 - `AllowAgentForwarding no` — prevents SSH agent forwarding, which could be exploited
 - `X11Forwarding no` — disables graphical session forwarding (unnecessary on a headless server)
 
-> **Note on SSH tunneling:** You may see guides recommend `PermitTunnel no` and `AllowTcpForwarding no` for further hardening. Be aware that the dashboard SSH tunnel (`ssh -N -L ...` from Phase 14) uses TCP port forwarding. If you set `AllowTcpForwarding no`, the dashboard tunnel will silently stop working. Only disable TCP forwarding if you plan to access the dashboard via direct Tailscale IP instead (see Phase 14).
+> **Note on SSH tunneling:** You may see guides recommend `PermitTunnel no` and `AllowTcpForwarding no` for further hardening. Be aware that the dashboard SSH tunnel (`ssh -N -L ...` from Phase 14) uses TCP port forwarding. If you set `AllowTcpForwarding no`, the dashboard tunnel will silently stop working. Only disable TCP forwarding if you plan to access the dashboard via direct Tailscale IP instead.
 
 ### Tailscale ACL Lockdown
 
@@ -716,12 +763,13 @@ Check https://tailscale.com/kb/1018/acls for more patterns. The key principle: d
 | `prompt too large for the model` | Context overflow | `/reset` in chat, trim MEMORY.md |
 | `agents.list.X.model: Invalid input` | Bad model config format | Use `"primary": "anthropic/claude-opus-4-6"` |
 | `Failed to connect to bus` | systemd user session missing | Export XDG_RUNTIME_DIR (see Phase 10) |
-| `openclaw: command not found` | nvm not loaded | `source ~/.bashrc` then `nvm use 22` |
+| `openclaw: command not found` | Shell not reloaded | `source ~/.bashrc` — if Node isn't installed, see Appendix B |
 | Bot doesn't respond | Multiple possible | Check logs (Phase 10), verify pairing, check `openclaw doctor` |
 | Telegram says "access not configured" | dmPolicy blocks you | Approve pairing or add your user ID to allowFrom |
 | Only one Telegram account starts | Account/binding mismatch | Check `channels.telegram.accounts` and `bindings` config |
 | Service doesn't survive reboot | Linger not enabled or XDG issue | `loginctl enable-linger openclaw`, set XDG vars |
 | Gateway accepts unauthenticated requests | Auth config didn't take | Re-check key path, restart, re-test (Phase 11) |
+| Service broke after Node update | Path changed | Re-run `which node`, update service — see Appendix A |
 
 ---
 
@@ -777,6 +825,8 @@ ssh -N -L 127.0.0.1:28789:127.0.0.1:18789 openclaw@TAILSCALE_IP
 - **MEMORY.md under 200 lines** — this is curated wisdom, not raw logs
 - **Set `thinkingDefault: "high"`** — without this, everything is shallow
 - Customize your agent's personality through `SOUL.md`, `IDENTITY.md`, and `USER.md` in the workspace
+- **Don't auto-update OpenClaw** — update manually, test, confirm nothing broke
+- **Take a backup before every update** — see Update Procedure below
 
 ---
 
@@ -793,35 +843,98 @@ ssh -N -L 127.0.0.1:28789:127.0.0.1:18789 openclaw@TAILSCALE_IP
 
 ---
 
-## 🔄 Update Procedure
+## 🔄 Update Procedure (Follow This Every Time)
 
 **Never just update and hope.** Back up first, update, verify.
 
+### Before updating:
+
 ```bash
-# 1. Backup
-tar -czf ~/openclaw-backup-$(date +%F).tar.gz ~/.openclaw/
+# 1. Encrypted backup
+tar -czf ~/openclaw-backup-$(date +%Y%m%d).tar.gz ~/.openclaw
+openssl enc -aes-256-cbc -salt -pbkdf2 \
+  -in ~/openclaw-backup-$(date +%Y%m%d).tar.gz \
+  -out ~/openclaw-backup-$(date +%Y%m%d).enc
+rm ~/openclaw-backup-$(date +%Y%m%d).tar.gz
 
 # 2. Take a Hetzner snapshot (Console → Snapshots → Create)
-
-# 3. Upgrade CLI
-npm update -g openclaw
-
-# 4. Check config compatibility
-openclaw doctor
-
-# 5. Restart
-openclaw gateway restart
-systemctl --user status openclaw-gateway.service --no-pager | head -n 25
-
-# 6. Verify models
-openclaw models status --probe
-
-# 7. Check logs
-LATEST="$(ls -t /tmp/openclaw/openclaw-*.log | head -1)"
-tail -n 120 "$LATEST" | egrep -i 'telegram|pair|401|auth|error|Unknown model|listening'
+#    Name it: pre-update-YYYYMMDD
 ```
 
-If something broke, restore from your backup or rebuild from the Hetzner snapshot.
+### Run the update:
+
+```bash
+# 3. Update OpenClaw — preferred method (official installer, does in-place upgrade):
+curl -fsSL https://openclaw.ai/install.sh | bash
+
+# Alternative if you installed via npm:
+# npm update -g openclaw
+
+# 4. Restart the gateway
+openclaw gateway restart
+```
+
+### Verify everything still works:
+
+```bash
+# 5. Run diagnostics
+openclaw doctor
+openclaw models status --probe
+
+# 6. Check service status
+systemctl --user status openclaw-gateway.service --no-pager | head -n 25
+
+# 7. Send a test message on Telegram — does it respond?
+```
+
+### If something broke:
+
+**First step — isolate optional integrations.** If you have fallback models or other optional integrations enabled, disable them before debugging further:
+
+```bash
+openclaw config set agents.defaults.model '{"primary":"anthropic/claude-sonnet-4-6"}'
+openclaw gateway restart
+openclaw doctor
+```
+
+If that fixes it, the issue is in the integration, not OpenClaw itself. If it doesn't, proceed with rollback:
+
+**Snapshot rollback (cleanest):**
+```bash
+# Hetzner Console → Snapshots → Rebuild from pre-update snapshot
+# This rolls back the entire server to the pre-update state
+```
+
+**npm version rollback (if you used npm to install):**
+```bash
+npm install -g openclaw@PREVIOUS_VERSION
+openclaw gateway restart
+```
+
+**Config restore from encrypted backup:**
+```bash
+# Decrypt (enter the password you set)
+openssl enc -d -aes-256-cbc -pbkdf2 \
+  -in ~/openclaw-backup-YYYYMMDD.enc \
+  -out ~/openclaw-backup-YYYYMMDD.tar.gz
+
+# Stop the service first
+openclaw gateway stop 2>/dev/null
+systemctl --user stop openclaw-gateway.service 2>/dev/null
+
+# Extract backup
+tar -xzf ~/openclaw-backup-YYYYMMDD.tar.gz -C /
+
+# Fix permissions
+chmod 700 ~/.openclaw
+chmod 700 ~/.openclaw/secrets 2>/dev/null
+chmod 600 ~/.openclaw/secrets/* 2>/dev/null
+
+# Restart
+openclaw gateway restart
+```
+
+**Only proceed with normal use after all checks pass.**
 
 ---
 
@@ -838,16 +951,90 @@ If something broke, restore from your backup or rebuild from the Hetzner snapsho
 1. Sign up for Hetzner → create CX32 Ubuntu 24.04 server
 2. SSH in as root → create `openclaw` user → test login
 3. Install Tailscale → confirm SSH via Tailscale IP works
-4. Lock down: UFW (Tailscale-only SSH), disable password auth, fail2ban
-5. Install nvm → Node.js 22 → OpenClaw CLI
-6. Run `openclaw onboard` → pick provider → paste API key → loopback mode
+4. Lock down: UFW (Tailscale-only SSH), harden SSH (`sed`-based, copy-paste safe), fail2ban
+5. Install OpenClaw via **official installer** (handles Node automatically — see Appendix B if manual Node needed)
+6. Run `openclaw onboard --install-daemon` → pick provider → paste API key → loopback mode
 7. **Validate locally: `openclaw chat` → `openclaw doctor`**
-8. **Lock secrets → migrate with SecretRefs**
-9. Start gateway: `openclaw gateway restart` → verify systemd service
-10. **Set up gateway auth → negative test to confirm rejection**
-11. Set up Telegram: @BotFather → token → config → approve pairing
+8. **Lock secrets → migrate with SecretRefs (production default)**
+9. Start gateway → verify systemd service → enable linger
+10. **Set up gateway auth (`gateway.auth.mode token`) → negative test**
+11. Set up Telegram: @BotFather → token → account-based config → approve pairing
 12. Turn on reasoning: `thinkingDefault: "high"`
-13. **Reboot test → Hetzner snapshot**
+13. **Reboot test → Hetzner snapshot → encrypted backup**
 14. Optional: Dashboard via SSH tunnel, SSH hardening extras, Tailscale ACL
 
 Done. Your AI assistant is live 24/7. 🦞
+
+---
+
+## Appendix A: Manual systemd Service (Last Resort)
+
+**You should not need this if `openclaw onboard --install-daemon` worked.** This is a recovery path for when the built-in daemon setup fails or you have custom requirements.
+
+The critical rule: **never hardcode paths.** Always use `which node` and `which openclaw` to get your actual installed paths.
+
+```bash
+# Get your real paths first
+which node        # e.g., /home/openclaw/.nvm/versions/node/v24.x.x/bin/node
+which openclaw    # e.g., /home/openclaw/.nvm/versions/node/v24.x.x/bin/openclaw
+```
+
+Create the service file:
+
+```bash
+mkdir -p ~/.config/systemd/user
+
+cat > ~/.config/systemd/user/openclaw-gateway.service << EOF
+[Unit]
+Description=OpenClaw Gateway
+After=network-online.target
+
+[Service]
+ExecStart=$(which node) $(which openclaw) gateway --port 18789
+Restart=always
+RestartSec=5
+Environment=HOME=%h
+Environment=PATH=$(dirname $(which node)):/usr/local/bin:/usr/bin:/bin
+
+[Install]
+WantedBy=default.target
+EOF
+```
+
+**What's happening here:** The `$(which node)` and `$(which openclaw)` commands insert your actual installed paths at the time you create the file. The `PATH` environment line ensures systemd can find everything — systemd runs in a stripped-down environment that doesn't load `.bashrc`, so without this explicit PATH, nvm's paths aren't available and the service fails silently.
+
+Enable and start:
+
+```bash
+systemctl --user daemon-reload
+systemctl --user enable openclaw-gateway
+systemctl --user start openclaw-gateway
+loginctl enable-linger openclaw
+```
+
+**If this service breaks after a Node update:** Re-run `which node` to get the new path, recreate the service file, then `systemctl --user daemon-reload && systemctl --user restart openclaw-gateway`.
+
+---
+
+## Appendix B: Manual Node.js Installation (Only if Installer Fails)
+
+**You should not need this if the official OpenClaw installer (Step 15) handled Node automatically.** Use this if the installer couldn't find or install Node, or if you prefer to manage Node versions yourself.
+
+```bash
+# Install nvm (Node Version Manager)
+curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash
+source ~/.bashrc
+
+# Install Node 24 (recommended) — or Node 22 if you prefer LTS stability
+nvm install 24
+nvm use 24
+nvm alias default 24
+
+# Verify
+node --version    # Should show v24.x.x
+which node        # Record this path
+```
+
+**Why `nvm`:** It lets you install and switch between Node versions without touching the system install. If OpenClaw later requires a different Node version, you can install it alongside the current one without breaking anything.
+
+After installing Node, go back to Step 15 and re-run the OpenClaw installer.
