@@ -83,9 +83,11 @@ openclaw models status --probe
 
 ### Telegram (Primary — start here)
 
-**Before editing config, inspect what the onboarding wizard already created:**
+**Step 1: Inspect your existing config before editing anything.**
 
-```python
+The onboarding wizard may have already created a Telegram block. The config shape varies between versions — some use a flat `botToken` field, others use an `accounts`-based structure. Do not blindly paste a schema from a guide.
+
+```bash
 python3 - <<'PY'
 import json, os, pprint
 p=os.path.expanduser("~/.openclaw/openclaw.json")
@@ -95,24 +97,22 @@ pprint.pp(cfg.get("channels", {}).get("telegram"))
 PY
 ```
 
-Follow the structure already present instead of blindly replacing the Telegram block.
+- If the output shows an existing Telegram config, **work within that structure** — add your bot token and set `dmPolicy` where the existing shape expects them.
+- If the output is `None`, you need to add Telegram config manually (see below).
 
-**If setting up manually:**
+**Step 2: Create your bot and add the token.**
 
 - [ ] Create bot via @BotFather → get token
-- [ ] In OpenClaw config (`~/.openclaw/openclaw.json`), add or verify:
-  ```json5
-  {
-    channels: {
-      telegram: {
-        botToken: "YOUR_TOKEN",
-        dmPolicy: "pairing"  // safest — requires approval on first message
-      }
-    }
-  }
-  ```
+- [ ] Add the bot token to your existing Telegram config structure in `~/.openclaw/openclaw.json`
+- [ ] Ensure `dmPolicy: "pairing"` is set (safest — requires approval on first message)
+
+> **If no Telegram config exists at all**, add a minimal block. Check `openclaw --help` or official docs for the current expected shape — it may be a flat `botToken` field or an `accounts`-based structure depending on your version.
+
+**Step 3: Restart and pair.**
+
 - [ ] `openclaw gateway restart`
-- [ ] Send DM to your bot → approve pairing:
+- [ ] Send a DM to your bot in Telegram
+- [ ] Approve the pairing:
   ```bash
   openclaw pairing approve telegram <PAIRING_CODE>
   ```
