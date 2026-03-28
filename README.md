@@ -2,12 +2,14 @@
 
 Your complete guide to setting up an OpenClaw AI assistant on your own VPS.
 
+> **This guide documents the native OpenClaw VPS pattern** — dedicated `openclaw` user, Tailscale-only admin access, loopback-bound gateway, Telegram-first interaction, and optional dashboard via SSH tunnel. It does not cover Docker/Compose installs.
+
 ## What Is This?
 
 OpenClaw is an open-source personal AI assistant that runs on your own server. It connects to your messaging apps (Telegram, Discord, WhatsApp, etc.), has access to tools (files, web search, shell commands), and remembers things between conversations.
 
 Think of it like having a personal ChatGPT that:
-- Runs 24/7 on an ~$8/month server
+- Runs 24/7 on your own VPS
 - Connects to YOUR apps and services
 - Has persistent memory across conversations
 - Can run tasks in the background while you sleep
@@ -15,12 +17,12 @@ Think of it like having a personal ChatGPT that:
 
 ## 📚 Guides
 
-### Setup (pick your OS)
-- **[Mac Setup Guide](guides/setup-mac.md)** — VPS + OpenClaw from a Mac (~30 min)
-- **[Windows Setup Guide](guides/setup-windows.md)** — VPS + OpenClaw from Windows (~30 min)
+### Setup
+- **[Hetzner VPS Setup Guide](guides/hetzner-setup-combined.md)** — From zero to a running AI assistant in ~30 minutes (Ubuntu 24.04, Tailscale, Telegram)
 
 ### After Setup
-- **[Post-Setup Guide](guides/post-setup-guide.md)** — What we learned in 6 weeks: reasoning, memory management, automation, security, multi-agent, cost control, and every gotcha we hit
+- **[Post-Setup Guide](guides/post-setup-guide.md)** — Operational knowledge: Telegram architecture, memory hygiene, dashboard access, troubleshooting, and everything we learned running OpenClaw in production
+- **[Production Setup Checklist](guides/openclaw-production-setup-checklist.md)** — Battle-tested checklist for client deployments
 
 ## 🧠 Agent Workspace Files
 
@@ -65,12 +67,12 @@ Once your main agent is solid, you can add specialists:
 
 ## 💰 Costs
 
-| Item | Cost |
-|------|------|
-| Hetzner VPS (CX32, 8GB RAM) | ~$8/month |
-| Anthropic API (Claude) | ~$20/month |
-| OpenAI API (Codex/GPT-5.4) | ~$20/month |
-| **Total** | **~$48/month** |
+| Item | Cost | Notes |
+|------|------|-------|
+| Hetzner VPS (CX32, 8GB RAM) | ~$8/month | Relatively fixed |
+| AI Provider APIs (Anthropic, OpenAI, etc.) | Variable | Depends on usage, model choice, number of agents |
+
+**Expect VPS cost plus variable provider spend.** Light use might run $18–25/month total. Moderate use with multiple agents and heavier builds can reach $40–60+/month. There is no single fixed total — it depends on your provider choices and how much you use the system.
 
 ## 📖 Resources
 

@@ -1,6 +1,8 @@
 # OpenClaw on Hetzner VPS — Secure Telegram-First Setup Guide
 ## From zero to a running AI assistant in ~30 minutes
 
+> **This guide documents the native OpenClaw VPS pattern**, not the Docker/Compose pattern.
+
 ---
 
 ## 📋 Overview
@@ -30,7 +32,8 @@ ls -la ~/.ssh/id_*.pub
 
 # If you see "No such file", create one:
 ssh-keygen -t ed25519 -C "you@example.com"
-# Press Enter for all defaults (no passphrase needed)
+# When prompted for a passphrase, enter a strong one (recommended)
+# This protects your key if your local machine is compromised
 ```
 
 **On Windows (PuTTY):**
@@ -132,6 +135,8 @@ If that works, proceed. If not, fix the SSH key copy before continuing.
 ## 🌍 PHASE 5: INSTALL TAILSCALE FIRST (5 min)
 
 **We install Tailscale before locking down SSH** so you always have a way in.
+
+> ⚠️ **Do not disable password/root SSH or restrict firewall rules until you have confirmed you can log in over the server's Tailscale IP as the `openclaw` user.** Hardening before Tailscale works = locked out.
 
 ### Step 9: Install Tailscale
 
@@ -359,6 +364,8 @@ Now message your bot again — it should respond! 🎉
 
 > **For known users only:** After pairing, you can switch to `dmPolicy: "allowlist"` and add `allowFrom: ["tg:YOUR_USER_ID"]` to skip future pairing.
 
+> **Group messages:** If you set `groupPolicy: "allowlist"` but don't populate the allowlist, group messages will be silently dropped. This is separate from DM pairing — DM pairing controls direct messages, `groupPolicy` controls group messages.
+
 ---
 
 ## ✅ PHASE 11: VERIFY EVERYTHING
@@ -384,6 +391,8 @@ openclaw gateway restart
 ### Step 25: Lock Down Secrets
 
 ```bash
+chmod 700 ~/.openclaw
+chmod 600 ~/.openclaw/openclaw.json
 chmod 700 ~/.openclaw/secrets/
 chmod 600 ~/.openclaw/secrets/*
 ```
@@ -427,10 +436,10 @@ The dashboard shows agent status, sessions, and system health. The tunnel keeps 
 If you want multiple bots (e.g., personal assistant + work agent):
 
 ### Rules:
-- **One Telegram bot token per bot** — never reuse across instances
-- On a single OpenClaw install, use `channels.telegram.accounts.*`
+- **One Telegram bot token per bot/account** — do not reuse a token across multiple OpenClaw instances if both need to receive updates reliably (updates get consumed unpredictably)
+- On a single OpenClaw install, model multiple bots as accounts using `channels.telegram.accounts.*`
 - Use `bindings` to route each bot to the correct agent
-- Pairing must be approved separately for each bot
+- Pairing must be approved separately for each bot/account
 
 ### Example config with two bots:
 ```json5

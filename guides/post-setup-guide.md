@@ -1,4 +1,4 @@
-# After Setup — What We Learned in 6 Weeks
+# After Setup — What We Learned Running OpenClaw in Production
 
 Everything the main guide doesn't cover. These are lessons from running OpenClaw in production across multiple businesses and 13 agents. Read this after your agent is running.
 
@@ -37,52 +37,57 @@ When your primary model hits rate limits, you need a backup or your agent goes s
 
 **Important:** If using Codex as fallback, the OAuth token expires every ~10 days. Set up a weekly cron to refresh it, or you'll discover it's dead at the worst possible moment.
 
-### 3. Set Up the Gateway as a Systemd Service
+### 3. Verify Service Management
 
-The setup guide uses PM2, but systemd is more reliable — it auto-restarts on crashes and starts on boot without extra config:
+OpenClaw runs as a **systemd user service** — auto-restarts on crashes, starts on boot. Confirm yours is running:
 
 ```bash
-mkdir -p ~/.config/systemd/user
+openclaw gateway restart
+systemctl --user status openclaw-gateway.service --no-pager | head -n 25
+```
 
-cat > ~/.config/systemd/user/openclaw-gateway.service << 'EOF'
-[Unit]
-Description=OpenClaw Gateway
-After=network-online.target
-Wants=network-online.target
+If `systemctl --user` fails in your SSH session:
+```bash
+export XDG_RUNTIME_DIR="/run/user/$(id -u)"
+export DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$(id -u)/bus"
+systemctl --user restart openclaw-gateway.service
+```
 
-[Service]
-ExecStart=/home/openclaw/.nvm/versions/node/v22.22.0/bin/node \
-  /home/openclaw/.openclaw/lib/node_modules/openclaw/dist/entry.js \
-  gateway --port 18789
-Restart=always
-RestartSec=5
-Environment=HOME=/home/openclaw
-
-[Install]
-WantedBy=default.target
-EOF
-
-# Enable and start
-systemctl --user daemon-reload
-systemctl --user enable openclaw-gateway
-systemctl --user start openclaw-gateway
-
-# Make it survive logouts
+Make sure linger is enabled so the service survives logout:
+```bash
 loginctl enable-linger openclaw
 ```
 
-Check status anytime: `systemctl --user status openclaw-gateway`
-
 ### 4. Lock Down File Permissions
 
-Your secrets directory should be readable only by you:
+Your config and secrets should be readable only by you:
 
 ```bash
-chmod 600 ~/.openclaw/secrets/*
+chmod 700 ~/.openclaw
+chmod 600 ~/.openclaw/openclaw.json
 chmod 700 ~/.openclaw/secrets/
+chmod 600 ~/.openclaw/secrets/*
 ```
 
-We found API keys sitting at 664 (world-readable). Fix this immediately.
+---
+
+## 📂 Where Things Live (Native Install)
+
+Know this layout — you'll need it for debugging:
+
+| Path | What |
+|------|------|
+| `~/.openclaw/openclaw.json` | Main config (edit this) |
+| `~/.openclaw/workspace/` | Main agent workspace (SOUL.md, MEMORY.md, etc.) |
+| `~/.openclaw/workspace-travel/` | Other agent workspaces (one per agent) |
+| `~/.openclaw/workspace-evenpath/` | Example: EvenPath agent workspace |
+| `~/.openclaw/agents/main/sessions/` | Session transcripts (can get huge) |
+| `~/.openclaw/secrets/` | API keys, tokens |
+| `~/.openclaw/cron/` | Cron job definitions (survives restarts) |
+| `~/.openclaw/auth/` | OAuth tokens, auth profiles |
+| `/tmp/openclaw/openclaw-*.log` | Gateway logs |
+
+This is the **native user install** layout. Docker/Compose installs use different paths.
 
 ---
 
@@ -102,33 +107,184 @@ We found API keys sitting at 664 (world-readable). Fix this immediately.
 
 **Keep these files lean.** Every token in these files is loaded every single message. A 2,000-line AGENTS.md wastes context on every turn.
 
-**Target sizes:**
+**Target guidance:**
 - CLAUDE.md: < 200 lines
 - SOUL.md: < 50 lines
 - USER.md: < 50 lines
-- MEMORY.md: < 200 lines (archive old stuff to `memory/archive/`)
+- MEMORY.md: Keep short — active summary only (see Memory/Session Hygiene below)
 - AGENTS.md: < 100 lines
 
 ---
 
-## 🧠 Memory Management
+## 📱 Telegram Architecture
 
-### The Problem
-Your agent wakes up fresh every session. Without files, it remembers nothing.
+### Single-Bot Basics
 
-### The Solution
-- **Daily notes** (`memory/YYYY-MM-DD.md`) — raw session logs
-- **Weekly summaries** (`memory/YYYY-WXX.md`) — consolidated weekly
-- **Long-term** (`MEMORY.md`) — curated essentials
-- **Archive** (`memory/archive/`) — old dailies after summarizing
+The main bot works as the default Telegram account. One bot, one agent, one workspace. This is the simplest pattern and where everyone should start.
 
-### Weekly Maintenance
-Every Sunday, review daily files from the past week:
-1. Consolidate into `memory/YYYY-WXX.md`
-2. Update `MEMORY.md` with anything worth keeping long-term
-3. Move old dailies to `memory/archive/`
+### Multi-Bot / Multi-Agent
 
-You can automate this with an OpenClaw cron job (see Automation section).
+In production, you'll likely run multiple Telegram bots for different agents:
+- `main` / `default` — personal assistant
+- `travel` — travel planning
+- `evenpath` — specialized agent
+- `clawhq` — operations
+
+**On a single OpenClaw install, multiple bots are modeled as accounts:**
+
+```json5
+{
+  channels: {
+    telegram: {
+      accounts: {
+        default: {
+          botToken: "TOKEN_FOR_MAIN_BOT",
+          dmPolicy: "pairing"
+        },
+        travel: {
+          botToken: "TOKEN_FOR_TRAVEL_BOT",
+          dmPolicy: "pairing"
+        }
+      }
+    }
+  },
+  bindings: [
+    { agentId: "main", match: { channel: "telegram", account: "default" } },
+    { agentId: "travel", match: { channel: "telegram", account: "travel" } }
+  ]
+}
+```
+
+### Important Telegram Rules
+
+**A. Pairing is per bot/account.**
+Being paired for `main` does not mean you're paired for `travel`. If Telegram says "access not configured," you need to approve pairing for that specific bot:
+
+```bash
+openclaw pairing approve telegram <PAIRING_CODE>
+```
+
+**B. Do not reuse a token across multiple OpenClaw instances.**
+If two separate OpenClaw installs use the same bot token, updates get consumed unpredictably — one instance eats the message before the other sees it.
+
+**C. Account/binding structure matters for startup.**
+We hit cases where only `travel` started polling but `main` did not. The gateway must be configured to poll all the accounts you need. Check your `accounts` and `bindings` config if an agent doesn't respond.
+
+**D. Default/main account handling.**
+If you have multiple accounts but forget to configure a `default`, the gateway may not know which account handles unmatched messages. Be explicit.
+
+**E. Group policy ≠ DM pairing.**
+`groupPolicy: "allowlist"` with no allowlist means group messages get silently dropped. That is separate from DM pairing — a user can be paired for DMs but still blocked in groups.
+
+---
+
+## 🖥️ Dashboard Access (SSH Tunnel)
+
+The dashboard shows agent status, sessions, and system health. It runs on the VPS but should **never** be exposed publicly.
+
+### How It Works
+
+- Gateway runs on the VPS, listening on `127.0.0.1:18789`
+- Your browser runs locally on your machine
+- An SSH tunnel connects local port `28789` to the remote `18789`
+- **All actual work still runs on the VPS** — the dashboard is only a control surface
+
+### Access Pattern
+
+From your **local machine**:
+```bash
+ssh -N -L 127.0.0.1:28789:127.0.0.1:18789 openclaw@TAILSCALE_IP
+```
+
+Then open: http://127.0.0.1:28789/
+
+If prompted, use the gateway auth token from `~/.openclaw/openclaw.json`.
+
+### Important
+
+The dashboard does **not** use your local machine for agent work. Tools, memory, workspace, and provider calls all happen on the VPS. The dashboard is purely a viewing/control interface.
+
+Keep gateway auth enabled even when accessing via Tailscale tunnel — it's an additional layer of protection.
+
+---
+
+## 🧠 Memory & Session Hygiene
+
+This is a **critical operational lesson**. Bots can appear completely broken when context overflows.
+
+### Symptoms
+
+- `Context overflow: prompt too large for the model`
+- No reply from agent (silently fails)
+- `MEMORY.md is ... chars (limit ...) truncating`
+- Giant `.jsonl` session files in `~/.openclaw/agents/*/sessions/`
+
+### What Causes It
+
+1. **MEMORY.md gets too long** — OpenClaw injects it every message. If it's huge, context overflows.
+2. **A Telegram session grows too large** — long conversation history fills context.
+3. **Workspace files are bloated** — AGENTS.md, CLAUDE.md, etc. all load every turn.
+
+### Fixes
+
+**Immediate relief:**
+- Use `/reset` or `/new` in Telegram to start a fresh session
+- Export/archive giant session files from `~/.openclaw/agents/*/sessions/`
+
+**Ongoing hygiene:**
+- Keep MEMORY.md short — use it for active summary only, not raw logs
+- Move long research into separate files:
+  - `workspace/research_exports/`
+  - `workspace/notes/`
+  - Archived session exports
+- Archive daily memory files older than a week to `memory/archive/`
+
+### The Architecture to Follow
+
+```
+MEMORY.md          ← Short, curated, active summary only
+memory/YYYY-MM-DD.md  ← Daily session logs
+memory/archive/       ← Old dailies after summarizing
+workspace/research_exports/  ← Long research outputs
+workspace/notes/      ← Reference notes
+```
+
+---
+
+## ⚠️ Model & Provider Cautions
+
+### Do Not Casually Edit Model Strings
+
+This was a major source of breakage. Common issues we hit:
+- `HTTP 401: Invalid Authentication` — stale auth profile, wrong provider
+- `Unknown model: anthropic/claude-sonnet-4-6` — typo or invalid model string
+- `agents.list.2.model: Invalid input` — malformed model object in config
+
+### Keep Model Objects Minimal
+
+**Good:**
+```json5
+{ "primary": "anthropic/claude-opus-4-6" }
+```
+
+**Bad (caused errors):**
+```json5
+{
+  "primary": "anthropic/claude-sonnet-4-6",
+  "_note": "Temporary downgrade for cost testing"
+}
+```
+
+Extra fields under the model object cause schema validation failures.
+
+### Always Verify After Model/Provider Changes
+
+```bash
+openclaw models status --probe
+openclaw doctor
+```
+
+Run both after any change to model config, API keys, or auth profiles.
 
 ---
 
@@ -204,9 +360,12 @@ After your first week, verify:
 - [ ] Fail2ban running (`sudo systemctl status fail2ban`)
 - [ ] Auto-updates enabled (`sudo systemctl status unattended-upgrades`)
 - [ ] Tailscale connected (`tailscale status`)
+- [ ] `~/.openclaw` permissions locked (`chmod 700 ~/.openclaw`)
+- [ ] `~/.openclaw/openclaw.json` permissions locked (`chmod 600`)
 - [ ] Secrets permissions locked (`ls -la ~/.openclaw/secrets/`)
 - [ ] Not running as root (`whoami` → should say `openclaw`)
 - [ ] Gateway auth token set (not running with open access)
+- [ ] Gateway auth enabled even with Tailscale tunnel
 
 ---
 
@@ -252,7 +411,7 @@ This creates:
 - New session store at `~/.openclaw/agents/work/`
 - Blank SOUL.md, USER.md, IDENTITY.md for the new agent
 
-Then create a Telegram bot for it and add bindings.
+Then create a Telegram bot for it and add bindings (see Telegram Architecture above).
 
 ### Communication Between Agents
 ```json5
@@ -277,17 +436,24 @@ Set `session.agentToAgent.maxPingPongTurns: 1` — otherwise agents will chat ba
 4. **Long conversations** — use `/reset` when switching topics.
 5. **Subagent spawns** — each spawn is a full agent turn.
 
-### Recommended Budget
-- **Hetzner CX32** (8GB RAM): ~$8/month
-- **Anthropic (Claude):** ~$20/month
-- **OpenAI (Codex/GPT-5.4):** ~$20/month — also serves as fallback
-- **Total:** ~$48/month
+### Realistic Cost Expectations
+
+| Item | Cost | Notes |
+|------|------|-------|
+| Hetzner CX32 (8GB RAM) | ~$8/month | Relatively fixed |
+| AI Provider APIs | Variable | Depends on provider, model, and usage |
+
+**Expect VPS cost plus variable provider spend.** There is no single fixed total.
+
+- **Light use:** ~$18–25/month
+- **Moderate use:** ~$30–50/month (multiple agents, daily builds)
+- **Heavy use:** ~$60+/month (many agents, heavy build sessions)
 
 ### What Burns Tokens Fastest
 - Opus: ~$15/million input tokens, $75/million output tokens
 - GPT-5.4: included with ChatGPT Pro, or ~$12/million via API
-- Typical day (moderate use): $1-3
-- Heavy build session: $5-15
+- Typical day (moderate use): $1–3
+- Heavy build session: $5–15
 
 ### Free/Cheap Alternatives
 - OpenRouter free models (Step 3.5 Flash, etc.) for low-priority agents
@@ -295,19 +461,132 @@ Set `session.agentToAgent.maxPingPongTurns: 1` — otherwise agents will chat ba
 
 ---
 
-## 📋 Common Issues We Hit
+## 🆘 Troubleshooting
 
-| Problem | Cause | Fix |
-|---------|-------|-----|
-| Agent sounds shallow/generic | Reasoning is off | `thinkingDefault: "high"` in config |
-| Agent dies during gateway restart | Session killed by restart | Schedule cron jobs BEFORE restarting |
-| Model fallback doesn't work | OAuth token expired | Refresh Codex token, check `auth-profiles.json` |
-| Agent can't message other agents | Session visibility too restrictive | Set `tools.sessions.visibility: "all"` |
-| Subagent can't access files | Sandboxed by default | Set `sandbox.mode: "off"` on the agent |
-| Telegram bot doesn't respond | Wrong allowFrom format | Use numeric user ID, not username |
-| "Command not found" after SSH | nvm not loaded | `source ~/.bashrc` or `nvm use 22` |
-| Agent context fills up fast | Workspace files too large | Trim MEMORY.md, archive old daily notes |
-| Cron job runs but nothing happens | Wrong session target | Use `--session isolated` for standalone tasks |
+### Real errors you'll actually hit
+
+#### A. `HTTP 401: Invalid Authentication`
+
+**Likely causes:**
+- Wrong API key in config
+- Stale auth profile or expired OAuth token
+- Wrong provider winning (check `~/.openclaw/auth/`)
+- Gateway needs restart after key change
+
+**Fix:** Check key in `~/.openclaw/openclaw.json`, verify with `openclaw models status --probe`, restart gateway.
+
+#### B. `access not configured` in Telegram
+
+**Cause:** Telegram pairing not approved for this bot/account.
+
+**Fix:**
+```bash
+openclaw pairing approve telegram <PAIRING_CODE>
+```
+
+Remember: pairing is per bot/account. Being paired for `main` doesn't mean you're paired for `travel`.
+
+#### C. `prompt too large for the model` (Context Overflow)
+
+**Fix:**
+- Use `/reset` or `/new` in Telegram
+- Archive giant session files from `~/.openclaw/agents/*/sessions/`
+- Shorten MEMORY.md — keep it as an active summary only
+
+#### D. `agents.list.X.model: Invalid input`
+
+**Cause:** Malformed agent model object in config (extra fields, wrong structure).
+
+**Fix:** Replace with minimal valid object:
+```json5
+{ "primary": "anthropic/claude-opus-4-6" }
+```
+
+#### E. `Failed to connect to bus`
+
+**Cause:** systemd user session not available in SSH.
+
+**Fix:**
+```bash
+export XDG_RUNTIME_DIR="/run/user/$(id -u)"
+export DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$(id -u)/bus"
+systemctl --user restart openclaw-gateway.service
+```
+
+#### F. Bot Not Responding At All
+
+**Possible causes (check in order):**
+1. Wrong bot username or token in config
+2. Pairing not approved
+3. Another instance consuming the same bot token's updates
+4. Provider not starting (check `openclaw models status --probe`)
+5. Webhook/update conflict
+
+**Debug:**
+```bash
+LATEST="$(ls -t /tmp/openclaw/openclaw-*.log | head -1)"
+tail -n 120 "$LATEST" | egrep -i 'telegram|pair|401|auth|error|Unknown model|listening'
+```
+
+#### G. Only One Telegram Account Starts
+
+**Cause:** Account/binding/default config mismatch. The gateway polls only the accounts it's configured for.
+
+**Fix:** Check `channels.telegram.accounts` — make sure every bot you need is listed. Check `bindings` — make sure each account is bound to the correct agent. Restart gateway after fixing.
+
+#### H. `openclaw: command not found`
+
+**Cause:** nvm not loaded in this shell session.
+
+**Fix:**
+```bash
+source ~/.bashrc
+nvm use 22
+```
+
+---
+
+## 🛠️ Operator Cheat Sheet
+
+Keep these handy:
+
+```bash
+# Connect
+ssh openclaw@TAILSCALE_IP
+
+# Service management
+openclaw gateway restart
+systemctl --user restart openclaw-gateway.service
+systemctl --user status openclaw-gateway.service --no-pager | head -n 25
+
+# If systemctl --user fails in SSH session
+export XDG_RUNTIME_DIR="/run/user/$(id -u)"
+export DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$(id -u)/bus"
+
+# Logs
+LATEST="$(ls -t /tmp/openclaw/openclaw-*.log | head -1)"
+tail -n 120 "$LATEST" | egrep -i 'telegram|pair|401|auth|error|Unknown model|listening'
+
+# Diagnostics
+openclaw doctor
+openclaw status
+openclaw models status --probe
+
+# Telegram pairing
+openclaw pairing list telegram
+openclaw pairing approve telegram <CODE>
+
+# Cron management
+openclaw cron list
+openclaw cron add --name "task" --every 6h --message "Do X" --announce
+
+# Dashboard (from local machine)
+ssh -N -L 127.0.0.1:28789:127.0.0.1:18789 openclaw@TAILSCALE_IP
+
+# Context reset (in Telegram)
+/reset
+/new
+```
 
 ---
 
@@ -325,6 +604,8 @@ Set `session.agentToAgent.maxPingPongTurns: 1` — otherwise agents will chat ba
 │   ├── 2026-W12.md        ← weekly summaries
 │   └── archive/           ← old dailies
 ├── research/              ← research outputs
+├── research_exports/      ← exported research from long sessions
+├── notes/                 ← reference notes
 ├── plans/                 ← project plans
 ├── scripts/               ← automation scripts
 └── work-logs/             ← task completion summaries

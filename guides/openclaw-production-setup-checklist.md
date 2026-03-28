@@ -1,118 +1,169 @@
 # OpenClaw Production Setup Checklist
 
-**Based on official recommendations from Corvis (OpenClaw founder).**
+**Native VPS pattern — the real production SOP.**
 
-For clients who want a battle-tested, secure, 24/7 AI assistant on their own server.
+> **This checklist targets the native OpenClaw VPS pattern:**
+> - Dedicated `openclaw` user (never root)
+> - Tailscale-only admin access
+> - Loopback-bound gateway (`127.0.0.1:18789`)
+> - Telegram-first operation with pairing
+> - Dashboard access via SSH tunnel only
+> - User-level systemd service management
+> - Explicit memory and session hygiene
+>
+> If you're running Docker/Compose or a local install, this checklist does not apply directly.
 
 ---
 
 ## ✅ Before You Start
 
-- [ ] VPS provisioned (Hetzner CX31 or better, Ubuntu 24.04)
-- [ ] SSH key-only access configured (`PasswordAuthentication no`)
-- [ ] Firewall active (`ufw default deny incoming`, allow SSH)
+- [ ] VPS provisioned (Hetzner CX32 or better, Ubuntu 24.04)
+- [ ] Dedicated `openclaw` user created (never run as root)
+- [ ] Tailscale installed and verified
+- [ ] Confirm `ssh openclaw@TAILSCALE_IP` works before disabling password auth or locking down firewall rules
+- [ ] SSH/firewall hardened only after Tailscale is confirmed working
+- [ ] Firewall active (`ufw default deny incoming`, allow SSH on `tailscale0` only)
 - [ ] Fail2Ban installed and running
-- [ ] Tailscale installed and authenticated (or Cloudflare Tunnel ready)
 - [ ] Node.js 22 installed via nvm
 - [ ] OpenClaw CLI installed globally (`npm install -g openclaw`)
+
+> ⚠️ **Security ordering matters:** Install Tailscale and verify SSH access via Tailscale IP **before** hardening SSH/firewall. Otherwise you can lock yourself out.
 
 ---
 
 ## 1. Install & Configure OpenClaw
 
-- [ ] Run `openclaw setup` and complete wizard
-  - [ ] Choose AI provider (Anthropic recommended)
-  - [ ] Enter API key (one key per client, never share)
-  - [ ] Select model (Claude Sonnet 4)
-  - [ ] Gateway mode: **Loopback** (localhost only)
-  - [ ] Select at least 1 channel (Telegram first, easiest)
+- [ ] Run the guided onboarding command for the installed version
+  - Prefer `openclaw onboard`
+  - If unavailable, try `openclaw setup`
+  - Check `openclaw --help` for the current guided setup command
+- [ ] Choose AI provider (Anthropic recommended)
+- [ ] Enter API key (one key per client, never share)
+- [ ] Choose a stable Claude model supported by the installed version
+- [ ] Gateway mode: **Loopback** (localhost only)
+- [ ] Select at least 1 channel (Telegram first, easiest)
+
+**Verify provider/model validity after setup:**
+
+```bash
+openclaw doctor
+openclaw models status --probe
+```
+
+> Do not hardcode a specific model string unless you have verified it against the installed version. Model names and availability change between releases.
 
 ---
 
 ## 2. Security Hardening
 
+**Network & access:**
+
 - [ ] Gateway listening only on `127.0.0.1:18789` (default, verify)
-- [ ] No public port forwarding to 18789 (use Tailscale or Cloudflare Tunnel for remote access)
+- [ ] No public port forwarding to 18789
+- [ ] Tailscale IP is the normal admin/SSH path
+- [ ] Dashboard should not be publicly exposed (use SSH tunnel — see Dashboard Architecture below)
 - [ ] SSH key-only auth, root login disabled
-- [ ] Fail2Ban enabled for ssh/nginx/gateway
-- [ ] `maxPingPongTurns: 1` set in config (prevents agent infinite loops)
+- [ ] Fail2Ban enabled for SSH
 - [ ] Automatic updates configured (`unattended-upgrades`)
-- [ ] Log rotation configured for `~/.openclaw/logs/`
+- [ ] Gateway auth token enabled (even with Tailscale)
+
+**File permissions:**
+
+- [ ] `~/.openclaw` permissions locked (`chmod 700`)
+- [ ] `~/.openclaw/openclaw.json` permissions locked (`chmod 600`)
+- [ ] `~/.openclaw/secrets/` permissions locked (`chmod 700`, files `chmod 600`)
+
+**Operational behavior:**
+
+- [ ] `maxPingPongTurns: 1` set in config (prevents agent-to-agent infinite loops — this is behavioral, not network hardening, but important for cost and stability)
 
 ---
 
 ## 3. Channel Configuration
 
-### Telegram (Easiest — start here)
+### Telegram (Primary — start here)
+
+**Before editing config, inspect what the onboarding wizard already created:**
+
+```python
+python3 - <<'PY'
+import json, os, pprint
+p=os.path.expanduser("~/.openclaw/openclaw.json")
+cfg=json.load(open(p))
+print("Telegram config:")
+pprint.pp(cfg.get("channels", {}).get("telegram"))
+PY
+```
+
+Follow the structure already present instead of blindly replacing the Telegram block.
+
+**If setting up manually:**
+
 - [ ] Create bot via @BotFather → get token
-- [ ] In OpenClaw config:
-  ```yaml
-  channels:
-    telegram:
-      token: "YOUR_TOKEN"
-      allowFrom: [YOUR_USER_ID]  # numeric ID, not @username
+- [ ] In OpenClaw config (`~/.openclaw/openclaw.json`), add or verify:
+  ```json5
+  {
+    channels: {
+      telegram: {
+        botToken: "YOUR_TOKEN",
+        dmPolicy: "pairing"  // safest — requires approval on first message
+      }
+    }
+  }
   ```
-- [ ] Test: DM your bot, should respond
-
-### Discord
-- [ ] Create application in Discord Developer Portal
-- [ ] Enable "Presence Intent", "Server Members Intent", "Message Content Intent"
-- [ ] Generate bot token
-- [ ] Create OAuth2 invite URL with `bot` + `applications.commands` scopes
-- [ ] Invite bot to server (needs "Send Messages", "Read Message History" permissions)
-- [ ] Config:
-  ```yaml
-  channels:
-    discord:
-      token: "YOUR_TOKEN"
-      guildId: "YOUR_GUILD_ID"
-      channelIds: ["CHANNEL_ID"]  # specific channels or leave for all
+- [ ] `openclaw gateway restart`
+- [ ] Send DM to your bot → approve pairing:
+  ```bash
+  openclaw pairing approve telegram <PAIRING_CODE>
   ```
+- [ ] If using groups: set `groupPolicy` and allowlist (separate from DM pairing)
 
-### Gmail (App Password wins)
-- [ ] Enable 2FA on Gmail account
-- [ ] Generate App Password (16-char)
-- [ ] Config:
-  ```yaml
-  channels:
-    gmail:
-      email: "seth@runyourownai.com"
-      password: "APP_PASSWORD"
-      watch: ["INBOX"]
-  ```
-- [ ] Test: send email to monitored inbox, OpenClaw should process
+**Telegram rules to understand:**
 
-### WhatsApp (via Baileys)
-- [ ] Install `@whiskeysockets/baileys` skill (from ClawHub)
-- [ ] QR scan to link WhatsApp Web session
-- [ ] No Business API or Twilio needed
+| Rule | Detail |
+|------|--------|
+| Pairing is per bot/account | Being paired for `main` does not mean you're paired for `travel` |
+| `dmPolicy: "pairing"` is safest | Requires explicit approval before the bot responds to a new user |
+| `groupPolicy` is separate from DM pairing | A user can be paired for DMs but still blocked in groups |
+| One Telegram token per bot/account | Do not reuse the same token across multiple live OpenClaw instances — updates get consumed unpredictably |
+| Multi-bot setups use accounts + bindings | See Multi-Agent Setup below |
+
+### Discord / Gmail / WhatsApp (Optional — verify against official docs)
+
+These channels are version-dependent.  Before configuring, check the official OpenClaw documentation for current config schema and supported options.
+
+- **Discord:** Requires bot application, Message Content Intent, and guild/channel IDs. Verify config shape against `openclaw --help` or official docs.
+- **Gmail:** Requires App Password (2FA must be enabled). Config shape may differ between versions.
+- **WhatsApp:** Via Baileys integration. QR scan to link. More complex setup — verify current skill/plugin availability.
+
+> Telegram should remain the primary documented channel. Other channels are supplemental and may not match the patterns described here.
 
 ---
 
-## 4. Essential Skills (Bundled)
+## 4. Skills Management
 
-These 13 skills come with OpenClaw:
+**Recommended approach — not a fixed bundled set:**
 
-- `weather` — get weather for any location
-- `healthcheck` — system health monitoring
-- `himalaya` — email reading/sending
-- `coding-agent` — code generation & review
-- `goplaces` — Google Maps directions/places
-- `session-logs` — view recent agent conversations
-- `summarize` — text summarization
-- `time` — current time/timezone
-- `echo` — simple reply (testing)
-- `logger` — custom event logging
-- `web-search` — web search (Perplexity)
-- `youtube-search` — find YouTube videos
-- `basic` — calculator, conversions, etc.
+- [ ] Start with a minimal skill set
+- [ ] Audit permissions before installing any skill:
+  - `shell`, `browser_unrestricted`, `file_write` outside `workspace/` = **dangerous**
+- [ ] Prefer official/trusted skills from ClawHub
+- [ ] Skills are part of the attack surface — treat new installs like new dependencies
+- [ ] Evaluate recommended starter skills: weather, healthcheck, web-search, coding-agent, time, summarize
 
-**Install essential ones:**
 ```bash
-openclaw skill install weather healthcheck himalaya coding-agent goplaces session-logs summarize web-search youtube-search
+# Install after reviewing what each does
+openclaw skill install <skill-name>
+
+# Discover available skills
+clawhub search
 ```
 
-Use `clawhub search` to discover more.
+**Do not auto-update skills in production.** Update manually after testing:
+
+```bash
+openclaw skill update <skill-name>
+```
 
 ---
 
@@ -120,25 +171,45 @@ Use `clawhub search` to discover more.
 
 - [ ] **One API key per client** (never share keys between clients)
 - [ ] Keys stored in `~/.openclaw/secrets/` (auto-created)
-- [ ] Hot-swap: Change key in config, no gateway restart needed
-- [ ] Monitor usage: `openclaw usage --days 7` (if available) or check provider dashboard
-- [ ] **No built-in budget caps** — set up manual alerts via cron:
+- [ ] Monitor usage via provider dashboard or `openclaw usage --days 7` (if available)
+- [ ] **No built-in budget caps** — set up manual alerts:
   ```bash
-  # Example: check Anthropic usage daily, email if >$15
+  # Example: daily usage check via cron
   0 9 * * * curl -s "ANTHROPIC_USAGE_URL" | jq '.daily > 15' && mail -s "High Anthropic Usage" you@example.com
   ```
+
+**After any provider or model change, verify and restart:**
+
+```bash
+openclaw doctor
+openclaw models status --probe
+openclaw gateway restart
+```
+
+> Do not assume provider/model changes take effect without a gateway restart. Always verify.
 
 ---
 
 ## 6. Backups
 
 **What to back up:**
+
 - `~/.openclaw/openclaw.json` — main config
 - `~/.openclaw/secrets/` — API keys, tokens
-- `~/.openclaw/workspace/` — agent workspaces, skills data
-- Optional: `~/.openclaw/logs/` if you want history
+- `~/.openclaw/workspace/` — main agent workspace
+- `~/.openclaw/workspace-*/` — additional agent workspaces
+
+**Session history (if needed):**
+
+If long-lived bots produce session transcripts you want to keep, archive important `.jsonl` session files from:
+
+- `~/.openclaw/agents/main/sessions/`
+- `~/.openclaw/agents/*/sessions/`
+
+> Native install logs live in `/tmp/openclaw/openclaw-*.log` — these are ephemeral and typically do not need backup, but you may want to capture them before a reboot if debugging.
 
 **How:**
+
 ```bash
 # Daily backup via rclone to Backblaze B2 (cheap)
 rclone sync ~/.openclaw/ b2:openclaw-backups/$(hostname)-$(date +%Y-%m-%d) --progress
@@ -149,135 +220,172 @@ rclone sync ~/.openclaw/ b2:openclaw-backups/$(hostname)-$(date +%Y-%m-%d) --pro
 
 ---
 
-## 7. SSL & Reverse Proxy (Only if needed)
+## 7. Native Path Layout
 
-**You don't need SSL** if:
-- Using only Telegram/Discord/Gmail channels
-- Gateway runs on `localhost` behind Tailscale
+Know where things live on a native install:
 
-**You DO need SSL if:**
-- You want a web dashboard accessible from browser
-- You're exposing the gateway publicly (not recommended)
+| Path | What |
+|------|------|
+| `~/.openclaw/openclaw.json` | Main config (edit this) |
+| `~/.openclaw/workspace/` | Main agent workspace (SOUL.md, MEMORY.md, etc.) |
+| `~/.openclaw/workspace-*/` | Additional agent workspaces |
+| `~/.openclaw/agents/main/sessions/` | Session transcripts (.jsonl files) |
+| `~/.openclaw/secrets/` | API keys, tokens |
+| `/tmp/openclaw/openclaw-*.log` | Gateway logs (ephemeral) |
 
-**Minimal Caddy config (3 lines):**
-```caddyfile
-runyourownai.com {
-    reverse_proxy localhost:18789
-}
+---
+
+## 8. Dashboard Architecture
+
+The dashboard runs on the VPS. Your browser is just a control surface — all actual work (tools, memory, provider calls) happens on the VPS.
+
+**Dashboard should be accessed through SSH tunnel only:**
+
+```bash
+# From your LOCAL machine:
+ssh -N -L 127.0.0.1:28789:127.0.0.1:18789 openclaw@TAILSCALE_IP
 ```
 
-Or use **Cloudflare Tunnel** (recommended over public SSL):
+Then open: http://127.0.0.1:28789/
+
+- Gateway auth token may still be required (check `~/.openclaw/openclaw.json`)
+- Keep gateway auth enabled even when accessing via Tailscale tunnel
+
+**Do not publicly expose the dashboard.** If there is a deliberate need for external access, consider in this order:
+
+1. No public exposure (default)
+2. Loopback gateway + Tailscale admin
+3. Dashboard via SSH tunnel
+4. Only then consider public reverse proxy / Cloudflare tunnel
+
+---
+
+## 9. Service Management & Monitoring
+
+OpenClaw runs as a **user-level systemd service** — auto-restarts on crashes, starts on boot:
+
 ```bash
-cloudflared tunnel create openclaw
-cloudflared tunnel route dns openclaw openclaw.yourdomain.com
-cloudflared tunnel run openclaw
+# Start/restart
+openclaw gateway restart
+systemctl --user restart openclaw-gateway.service
+
+# Status
+systemctl --user status openclaw-gateway.service --no-pager | head -n 25
+
+# Make it survive logouts
+loginctl enable-linger openclaw
+```
+
+If `systemctl --user` fails in SSH session:
+
+```bash
+export XDG_RUNTIME_DIR="/run/user/$(id -u)"
+export DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$(id -u)/bus"
+systemctl --user restart openclaw-gateway.service
+```
+
+**Log inspection:**
+
+```bash
+LATEST="$(ls -t /tmp/openclaw/openclaw-*.log | head -1)"
+tail -n 120 "$LATEST" | egrep -i 'telegram|pair|401|auth|error|Unknown model|listening'
+```
+
+**Primary health/diagnostic commands:**
+
+```bash
+openclaw doctor
+openclaw models status --probe
+systemctl --user status openclaw-gateway.service --no-pager | head -n 25
+```
+
+> **Health-check caution:** `curl http://localhost:18789/health` may work as a simple check, but it is version-dependent. Do not rely on it as your sole monitoring — use `openclaw doctor` and systemd status as primary diagnostics.
+
+**Heartbeat cron (optional):**
+
+```bash
+*/5 * * * * curl -s http://localhost:18789/health > /dev/null || echo "OpenClaw may be down" | mail -s "ALERT" you@example.com
 ```
 
 ---
 
-## 8. Monitoring & Alerts
+## 10. Memory & Session Hygiene
 
-**Prefer systemd over PM2** for production:
+This is a **critical operational discipline** for long-lived bots.
 
-```bash
-# Create systemd service
-sudo nano /etc/systemd/system/openclaw.service
+**Rules:**
+
+- **MEMORY.md should stay short and curated** — it is loaded every single message. Keep it as an active summary, not raw logs.
+- Use `/reset` or `/new` in Telegram when context is bloated or when switching topics.
+- Archive important large `.jsonl` session files from `~/.openclaw/agents/*/sessions/`
+- Do not treat MEMORY.md as a dumping ground for raw research or conversation logs.
+- Long research should live in exported notes / markdown files in the workspace, not in the main memory file.
+
+**Recommended memory architecture:**
+
+```
+MEMORY.md                     ← Short, curated, active summary only
+memory/YYYY-MM-DD.md          ← Daily session logs
+memory/archive/               ← Old dailies after summarizing
+workspace/research_exports/   ← Long research outputs
+workspace/notes/              ← Reference notes
 ```
 
-```ini
-[Unit]
-Description=OpenClaw Gateway
-After=network.target
+**Symptoms of poor hygiene:**
 
-[Service]
-Type=simple
-User=openclaw
-WorkingDirectory=/home/openclaw
-ExecStart=/usr/bin/openclaw gateway start
-Restart=on-failure
-RestartSec=10
-StandardOutput=journal
-StandardError=journal
-
-[Install]
-WantedBy=multi-user.target
-```
-
-```bash
-sudo systemctl daemon-reload
-sudo systemctl enable openclaw
-sudo systemctl start openclaw
-```
-
-**Health checks:**
-```bash
-# Full system probe
-openclaw status --deep
-
-# Simple check
-curl http://localhost:18789/health || echo "DOWN"
-```
-
-**Heartbeat cron (alert if down):**
-```bash
-# Check every 5 minutes, email if fails
-*/5 * * * * curl -s http://localhost:18789/health > /dev/null || echo "OpenClaw is down" | mail -s "ALERT" you@example.com
-```
-
----
-
-## 9. CLI Tools to Pre-Install
-
-On every client VPS:
-
-```bash
-# Already done
-npm install -g openclaw
-
-# Useful extras
-sudo apt install -y jq yq htop iotop curl bc
-```
-
-**Optional one-shot bootstrap script:**
-```bash
-#!/bin/bash
-# setup-client-vps.sh
-apt update && apt install -y jq yq htop iotop curl ufw fail2ban
-curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash
-source ~/.bashrc
-nvm install 22
-nvm alias default 22
-npm install -g openclaw
-# Add user, harden SSH, etc.
-```
-
----
-
-## 10. Skills Management
-
-- **No auto-updates** — disable automatic skill updates in production
-- Update manually after testing: `openclaw skill update <skill-name>`
-- **Audit skill permissions** before installing:
-  - `shell`, `browser_unrestricted`, `file_write` outside `workspace/` = DANGEROUS
-  - Only install skills from trusted authors (official, OpenClaw team)
-- **Block dangerous skills:** Document which ones clients should never install
+- `Context overflow: prompt too large for the model`
+- `MEMORY.md is ... chars (limit ...) truncating`
+- No reply from agent (silent context overflow)
+- Giant `.jsonl` session files consuming disk
 
 ---
 
 ## 11. Multi-Agent Setup
 
-**Recommendation:** Single OpenClaw instance can handle **13+ agents** on 8GB VPS. No need to split.
+**Capacity:**
+
+Multiple agents are possible on an 8GB VPS. Actual capacity depends on model choice, concurrency, active skills, and memory usage. Start small, monitor resource usage, and scale gradually.
+
+```bash
+# Monitor resource usage
+htop
+```
 
 **Isolation:**
-- Separate API keys for each client environment (already done)
-- Agents share skills pool (that's fine)
-- Use `openclaw agent create` to add new agents
-- Per-agent config in `~/.openclaw/agents/<agent-id>/`
 
-**Scaling threshold:**
-- 8GB CX31: up to 15 agents comfortable
-- 16GB CX41: up to 30+ agents
-- Switch to PostgreSQL only if >50 agents or heavy memory usage
+- Separate API keys for each client environment
+- Each agent gets its own workspace (`~/.openclaw/workspace-<agent>/`)
+- Per-agent config in `~/.openclaw/agents/<agent-id>/`
+- Use `openclaw agents add <name>` to create new agents
+
+**Multi-agent routing depends on Telegram accounts + bindings + pairing per bot/account:**
+
+```json5
+{
+  channels: {
+    telegram: {
+      accounts: {
+        default: {
+          botToken: "TOKEN_FOR_PERSONAL_BOT",
+          dmPolicy: "pairing"
+        },
+        work: {
+          botToken: "TOKEN_FOR_WORK_BOT",
+          dmPolicy: "pairing"
+        }
+      }
+    }
+  },
+  bindings: [
+    { agentId: "main", match: { channel: "telegram", account: "default" } },
+    { agentId: "work", match: { channel: "telegram", account: "work" } }
+  ]
+}
+```
+
+- Pairing must be approved separately for each bot/account
+- If only one bot starts polling, check your `accounts` and `bindings` config
+- Be explicit about which account is `default` — the gateway uses this for unmatched messages
 
 ---
 
@@ -287,26 +395,40 @@ Your OpenClaw is production-ready when:
 
 - [ ] Gateway bound to localhost only (no public port exposure)
 - [ ] At least 1 channel tested and working (Telegram recommended first)
-- [ ] AI provider API key configured and responding
+- [ ] AI provider API key configured and responding (`openclaw models status --probe`)
 - [ ] Security hardened (SSH keys, firewall, fail2ban, unattended-upgrades)
+- [ ] Tailscale SSH tested and working
+- [ ] Dashboard tunnel tested (can access via `ssh -N -L ...`)
+- [ ] Telegram pairing tested and approved for each bot/account
 - [ ] Backups scheduled (daily) and tested restore
-- [ ] Monitoring configured (systemd + heartbeat cron)
-- [ ] Essential skills installed (weather, healthcheck, himalaya, coding-agent, etc.)
+- [ ] Monitoring configured (systemd + diagnostics)
 - [ ] `maxPingPongTurns: 1` set
 - [ ] Separate API keys per client environment
-- [ ] Documentation reviewed with client (how to use, troubleshoot, contact support)
+- [ ] Session/archive strategy documented if long-lived bots are expected
+- [ ] MEMORY.md hygiene understood and practiced
+- [ ] Gateway auth token enabled
+- [ ] File permissions locked (`~/.openclaw` 700, config 600)
 
 ---
 
 ## 13. Common Gotchas
 
-- **21,000 exposed instances problem:** Never expose port 18789 publicly. Use Tailscale or Cloudflare Tunnel.
-- **Infinite agent loops:** `maxPingPongTurns: 1` prevents this.
-- **API key sharing:** One key per client, never reuse.
-- **Auto-updates:** Don't enable OpenClaw auto-update in production. Test before upgrading.
-- **Dangerous skills:** Avoid `shell`, `browser_unrestricted`, `file_write` outside workspace.
-- **Log rotation:** Set up logrotate or logs will fill disk.
-- **Backup secrets:** If you lose `~/.openclaw/secrets/`, you lose API keys and channel tokens. Backup religiously.
+| Problem | Cause | Fix |
+|---------|-------|-----|
+| `access not configured` in Telegram | Pairing not approved for this bot/account | `openclaw pairing approve telegram <CODE>` |
+| `agents.list.X.model: Invalid input` | Malformed model object in config | Use minimal: `{ "primary": "anthropic/claude-opus-4-6" }` |
+| Context overflow / giant sessions | MEMORY.md too long, session too long | `/reset`, trim MEMORY.md, archive `.jsonl` files |
+| Only one Telegram account starts | Account/binding mismatch | Check `channels.telegram.accounts` and `bindings` |
+| Default bot vs secondary account confusion | `default` account not explicit | Be explicit about which account handles unmatched messages |
+| Stale Telegram config after updates | Config shape changed between versions | Inspect config (see Python snippet above), fix structure |
+| `Failed to connect to bus` | systemd user session missing | Export `XDG_RUNTIME_DIR` and `DBUS_SESSION_BUS_ADDRESS` |
+| `HTTP 401: Invalid Authentication` | Wrong/stale API key or auth profile | Verify key, run `openclaw models status --probe`, restart |
+| `Unknown model` errors | Invalid model string for installed version | Check `openclaw models status --probe`, fix model config |
+| Never expose port 18789 publicly | 21,000+ exposed instances on the internet | Use Tailscale + SSH tunnel only |
+| Infinite agent loops | Missing `maxPingPongTurns` setting | Set `maxPingPongTurns: 1` |
+| API key sharing | Keys reused across clients | One key per client, always |
+| Log rotation not set up | Logs fill disk over time | Set up logrotate for `/tmp/openclaw/` |
+| Backup secrets missing | `~/.openclaw/secrets/` not backed up | Backup religiously — losing it means losing all keys/tokens |
 
 ---
 
@@ -325,33 +447,35 @@ npm update -g openclaw
 openclaw doctor
 
 # 4. Restart
-sudo systemctl restart openclaw  # if using systemd
-# or
-pm2 restart openclaw
+openclaw gateway restart
+systemctl --user status openclaw-gateway.service --no-pager | head -n 25
 
-# 5. Verify
-openclaw status --deep
+# 5. Verify models
+openclaw models status --probe
+```
+
+**Post-upgrade log verification:**
+
+```bash
+LATEST="$(ls -t /tmp/openclaw/openclaw-*.log | head -1)"
+tail -n 120 "$LATEST" | egrep -i 'telegram|pair|401|auth|error|Unknown model|listening'
 ```
 
 **Cron:** Monthly upgrade check, but test in staging first. Quarterly actual upgrade.
 
 ---
 
-## 15. Local AI Alternative (Perplexity Desktop)
+## 15. CLI Tools to Pre-Install
 
-For clients who want to avoid monthly API costs:
+On every client VPS:
 
-- **Perplexity Desktop** is a self-hosted AI assistant for local machines
-- Requirements: 16GB RAM minimum, GPU optional (accelerates)
-- Privacy: 100% local, no cloud API calls
-- Cost: Hardware upfront, $0/mo ongoing
-- Complexity: Higher than VPS setup (driver issues, GPU setup)
-- **Not recommended** for non-technical clients — VPS + OpenClaw is simpler
+```bash
+# Already done
+npm install -g openclaw
 
-If client wants local:
-- Recommend 32GB RAM + RTX 4090 for best performance
-- Or 16GB MacBook Pro M2 (works but slower)
-- Still need to install OpenClaw locally and manage updates
+# Useful extras
+sudo apt install -y jq yq htop iotop curl bc
+```
 
 ---
 
@@ -363,5 +487,5 @@ If client wants local:
 
 ---
 
-**Last updated:** 2026-03-25
+**Last updated:** 2026-03-28
 **Maintainer:** Kito (RunYourOwnAI.com)
