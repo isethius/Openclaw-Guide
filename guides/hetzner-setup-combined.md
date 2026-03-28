@@ -1,7 +1,9 @@
 # OpenClaw on Hetzner VPS — Secure Telegram-First Setup Guide
-## From zero to a running AI assistant in ~30 minutes
+## From zero to a running AI assistant in ~45 minutes
 
 > **This guide documents the native OpenClaw VPS pattern**, not the Docker/Compose pattern.
+
+> **Living document warning:** Before implementing, re-check the OpenClaw install, secrets, gateway auth, and provider docs if this guide is more than a few weeks old. OpenClaw is actively developed; specific commands and config keys may have changed.
 
 ---
 
@@ -13,11 +15,25 @@ We're setting up an $8/month VPS on Hetzner to run OpenClaw 24/7 with Tailscale 
 - Credit/debit card (Hetzner charges ~$8/month)
 - SSH key for security (we'll generate one)
 - Terminal access (Mac/Linux) or PuTTY (Windows)
+- Anthropic API key
+- Tailscale account
 
 **Total monthly cost:**
 - VPS: ~$8 (CX32, 8GB RAM)
 - AI APIs (Anthropic/OpenAI): ~$10–15 minimum
 - **Total: ~$18–23/month minimum** (heavier use: $40–60+)
+
+---
+
+## Before You Start — Non-Negotiable Rules
+
+- Never run OpenClaw as root
+- Never expose ports publicly without auth
+- Never leave secrets in world-readable directories
+- Never paste API keys, Telegram bot tokens, or gateway auth tokens into chat windows, screenshots, or unencrypted notes
+- Always verify access works before locking anything down
+- Always test after each major step — don't stack changes and debug later
+- Always backup before updating
 
 ---
 
@@ -35,6 +51,13 @@ ssh-keygen -t ed25519 -C "you@example.com"
 # When prompted for a passphrase, enter a strong one (recommended)
 # This protects your key if your local machine is compromised
 ```
+
+Copy your public key to clipboard:
+```bash
+cat ~/.ssh/id_ed25519.pub | pbcopy
+```
+
+The public key is what you share. The private key (`id_ed25519` without `.pub`) never leaves your machine.
 
 **On Windows (PuTTY):**
 - Download PuTTY from putty.org
@@ -249,7 +272,6 @@ npm install -g openclaw
 
 # Verify
 openclaw --version
-# Should show: OpenClaw CLI v2026.3.x
 ```
 
 ---
@@ -262,7 +284,7 @@ openclaw --version
 openclaw onboard
 ```
 
-> **Note:** If `openclaw onboard` isn't available in your version, try `openclaw setup` or check `openclaw --help` for the current guided setup command.
+> **Note:** If `openclaw onboard` isn't available in your version, try `openclaw setup` or check `openclaw --help` for the current guided setup command. If your version supports `--install-daemon`, use `openclaw onboard --install-daemon` to set up the systemd service automatically.
 
 The wizard will ask:
 
@@ -279,19 +301,96 @@ The wizard will ask:
 - Choose **Loopback** (localhost only) — safest
 
 **4. Model:**
+- Choose a stable Claude model supported by the installed version
 - Claude Sonnet 4 (recommended balance of quality + cost)
 - Claude Opus 4 (best quality, higher cost)
 
 **5. Channel:**
 - Choose **Telegram** (easiest to start)
 
+### Step 18: Validate Directly on the VPS
+
+**Before connecting Telegram, the dashboard, or any other integration — validate the base install works locally on the VPS first.**
+
+```bash
+openclaw chat
+```
+
+Type a message, confirm you get a response, then `Ctrl+C` to exit.
+
+If this fails, fix it now. Common issues at this stage:
+- Wrong API key → re-enter via `openclaw config set`
+- Stale shell → `source ~/.bashrc`
+- Missing dependency → check `openclaw doctor`
+
+**Do not proceed until `openclaw chat` works.** If the foundation is broken, adding services and Telegram on top just compounds the problem. Doctor output, config errors, and log messages are all visible directly on the VPS — use them here before you add the indirection of Telegram or dashboard.
+
+```bash
+openclaw doctor
+openclaw models status --probe
+```
+
+Fix anything flagged before continuing.
+
 ---
 
-## 🚀 PHASE 9: START OPENCLAW AS A SERVICE
+## 🔐 PHASE 9: LOCK & MIGRATE SECRETS
+
+**Do this immediately after setup, before starting the service.** The setup wizard stores API keys and tokens directly in `openclaw.json` as plaintext. On a hardened setup, that's not acceptable — anyone who can read the file sees every credential.
+
+### Step 19: Lock File Permissions
+
+```bash
+chmod 700 ~/.openclaw
+chmod 600 ~/.openclaw/openclaw.json
+chmod 700 ~/.openclaw/secrets/ 2>/dev/null
+chmod 600 ~/.openclaw/secrets/* 2>/dev/null
+```
+
+`700` means only the `openclaw` user can read, write, or list files. Everyone else gets "Permission denied."
+
+### Step 20: Migrate Secrets Out of Plaintext Config
+
+OpenClaw supports **SecretRefs** — a mechanism where secrets are stored separately and referenced in config using a structured object instead of plaintext strings. This is the production default, not an optional extra.
+
+**The documented secrets workflow:**
+
+```bash
+# 1. Audit — see what's currently exposed in plaintext
+openclaw secrets audit --check
+
+# 2. Configure — interactively set up secret storage for each credential
+openclaw secrets configure
+
+# 3. Dry run — preview what will change without applying
+openclaw secrets apply --from /tmp/openclaw-secrets-plan.json --dry-run
+
+# 4. Apply — actually migrate the secrets
+openclaw secrets apply --from /tmp/openclaw-secrets-plan.json
+
+# 5. Re-audit — confirm plaintext credentials are gone
+openclaw secrets audit --check
+
+# 6. Reload — pick up the new config
+openclaw secrets reload
+
+# 7. Verify everything still works
+openclaw doctor
+```
+
+> **Note:** The plan file path (`/tmp/openclaw-secrets-plan.json`) is what current docs show. If `openclaw secrets configure` outputs a different path, use that instead — the command will tell you where the plan was saved.
+
+> **Version note:** If `openclaw secrets` commands aren't available in your installed version, the `chmod` lockdown from Step 19 is your primary protection. Check https://docs.openclaw.ai/gateway/secrets for your version's capabilities.
+
+After migration, manually inspect `~/.openclaw/openclaw.json` and confirm **no plaintext tokens remain**. The config should contain SecretRef objects pointing to your stored secrets, not the secrets themselves.
+
+---
+
+## 🚀 PHASE 10: START OPENCLAW AS A SERVICE
 
 OpenClaw runs as a **systemd user service** — auto-restarts on crashes, starts on boot.
 
-### Step 18: Start the Gateway
+### Step 21: Start the Gateway
 
 ```bash
 openclaw gateway restart
@@ -310,7 +409,7 @@ Make it survive logouts:
 loginctl enable-linger openclaw
 ```
 
-### Step 19: Check Logs
+### Step 22: Check Logs
 
 ```bash
 LATEST="$(ls -t /tmp/openclaw/openclaw-*.log 2>/dev/null | head -1)"
@@ -319,39 +418,99 @@ tail -n 120 "$LATEST" | egrep -i 'telegram|pair|401|auth|error|listening'
 
 ---
 
-## 📱 PHASE 10: CONNECT TELEGRAM
+## 🔑 PHASE 11: GATEWAY AUTHENTICATION
 
-### Step 20: Create a Telegram Bot
+Tailscale protects the network layer — only your devices can reach the server. Gateway auth adds a second lock at the application layer. If someone gets onto your tailnet (compromised device, shared account), they still can't control your agent without the auth token. Defense in depth.
+
+### Step 23: Generate and Set the Auth Token
+
+```bash
+# Generate a strong random token
+openssl rand -hex 32
+```
+
+Copy the output and configure it:
+
+```bash
+openclaw config set gateway.auth.token "YOUR_TOKEN_HERE"
+openclaw gateway restart
+```
+
+> **Version note:** If `gateway.auth.token` doesn't work as the config key path, check https://docs.openclaw.ai/gateway/authentication for your installed version's exact syntax. Older versions may use `gateway.authToken`. Run `openclaw config get gateway` after setting to confirm it took.
+
+### Step 24: Verify Auth Is Working (Negative Test)
+
+Configuring the token isn't enough — you need to verify the gateway actually **rejects** unauthenticated access. This is the most important verification step.
+
+```bash
+# Confirm config looks right
+openclaw config get gateway
+
+# Check status
+openclaw status
+```
+
+Run an auth-gated probe that your installed version exposes via `openclaw gateway --help`. Confirm it:
+1. **Fails without a token** (unauthenticated access is rejected)
+2. **Succeeds with the correct token**
+
+If the probe succeeds without a token, the auth config didn't take — re-check the key path, restart the gateway, and re-test.
+
+> **Save the token securely.** You'll need it for dashboard access (Phase 14) and potentially for API integrations. Do not store it in plaintext notes — use a password manager or your SecretRefs storage.
+
+---
+
+## 📱 PHASE 12: CONNECT TELEGRAM
+
+### Step 25: Create a Telegram Bot
 
 1. Open Telegram, search for **@BotFather**
 2. Send `/newbot`
 3. Choose name: `YourNameAssistant`
 4. Choose username: must end in `bot` (e.g., `myopenclawbot`)
-5. Copy the **Bot Token** (looks like `1234567890:ABCdefGhIJKlmNoPQRsTUVwxyz`)
+5. Copy the **Bot Token** — treat this like a password
 
-### Step 21: Configure Telegram in OpenClaw
+### Step 26: Configure Telegram in OpenClaw
 
-Edit `~/.openclaw/openclaw.json` and add (or the setup wizard may have already created this):
+**First, check if the setup wizard already created a Telegram config:**
+
+```bash
+python3 - <<'PY'
+import json, os, pprint
+p=os.path.expanduser("~/.openclaw/openclaw.json")
+cfg=json.load(open(p))
+print("Telegram config:")
+pprint.pp(cfg.get("channels", {}).get("telegram"))
+PY
+```
+
+If a Telegram block already exists, **work within that structure** — add your bot token and set `dmPolicy` where the existing shape expects them.
+
+If no Telegram config exists, add it to `~/.openclaw/openclaw.json`. For production, prefer the account-based structure even for a single bot — it scales cleanly to multi-bot setups later:
 
 ```json5
 {
   channels: {
     telegram: {
-      enabled: true,
-      botToken: "PASTE_YOUR_BOT_TOKEN",
-      dmPolicy: "pairing",  // safest — requires approval on first message
-      groups: { "*": { requireMention: true } }
+      accounts: {
+        default: {
+          botToken: "PASTE_YOUR_BOT_TOKEN",
+          dmPolicy: "pairing"  // safest — requires approval on first message
+        }
+      }
     }
   }
 }
 ```
+
+> **If you completed the SecretRefs migration in Phase 9**, use a SecretRef for the bot token instead of pasting it directly. Check https://docs.openclaw.ai/gateway/secrets for the supported format.
 
 Restart the gateway:
 ```bash
 openclaw gateway restart
 ```
 
-### Step 22: Approve Your First Message
+### Step 27: Approve Your First Message
 
 Send any message to your bot in Telegram. You'll need to approve the pairing:
 
@@ -368,18 +527,20 @@ Now message your bot again — it should respond! 🎉
 
 ---
 
-## ✅ PHASE 11: VERIFY EVERYTHING
+## ✅ PHASE 13: VERIFY EVERYTHING
 
-### Step 23: Run Diagnostics
+### Step 28: Run Diagnostics
 
 ```bash
 openclaw doctor
 openclaw status
+openclaw models status --probe
+systemctl --user status openclaw-gateway.service --no-pager | head -n 25
 ```
 
 Fix anything flagged.
 
-### Step 24: Turn On Reasoning (CRITICAL)
+### Step 29: Turn On Reasoning (CRITICAL)
 
 This is the #1 setting people miss. Without it, your agent sounds shallow:
 
@@ -388,18 +549,36 @@ openclaw config set agents.defaults.thinkingDefault high
 openclaw gateway restart
 ```
 
-### Step 25: Lock Down Secrets
+### Step 30: Reboot Test
+
+**"Installed" doesn't mean "working after reboot."** This is the most important test.
 
 ```bash
-chmod 700 ~/.openclaw
-chmod 600 ~/.openclaw/openclaw.json
-chmod 700 ~/.openclaw/secrets/
-chmod 600 ~/.openclaw/secrets/*
+sudo reboot
 ```
+
+Wait a minute, then SSH back in via Tailscale:
+
+```bash
+ssh openclaw@YOUR_TAILSCALE_IP
+systemctl --user status openclaw-gateway.service --no-pager | head -n 25
+```
+
+Send a Telegram message to your bot. If it responds, everything survived the reboot. If the service didn't come back, revisit Phase 10 — check linger, XDG_RUNTIME_DIR, and the systemd service.
+
+### Step 31: Take a Hetzner Snapshot
+
+Capture the fully working state so you can roll back if a future update breaks things:
+
+1. Go to https://console.hetzner.cloud
+2. Click your server → **Snapshots** tab
+3. Click **Create Snapshot** → name it `post-setup-clean`
+
+Take additional snapshots before major OpenClaw updates or significant config changes.
 
 ---
 
-## 🖥️ PHASE 12: DASHBOARD ACCESS (Optional)
+## 🖥️ PHASE 14: DASHBOARD ACCESS (Optional)
 
 The OpenClaw dashboard runs on your VPS but should NOT be exposed publicly. Access it via SSH tunnel:
 
@@ -410,9 +589,9 @@ ssh -N -L 127.0.0.1:28789:127.0.0.1:18789 openclaw@TAILSCALE_IP
 
 Then open: http://127.0.0.1:28789/ in your browser.
 
-If prompted, use the gateway auth token from `~/.openclaw/openclaw.json`.
+If prompted, use the gateway auth token you set in Phase 11.
 
-The dashboard shows agent status, sessions, and system health. The tunnel keeps everything private.
+The dashboard shows agent status, sessions, and system health. The tunnel keeps everything private — the dashboard is only a control surface; all actual work runs on the VPS.
 
 ---
 
@@ -467,6 +646,65 @@ If you want multiple bots (e.g., personal assistant + work agent):
 
 ---
 
+## 🔒 Optional Security Upgrades
+
+These are not part of the critical path but significantly improve your security posture.
+
+### SSH Hardening Extras
+
+The base guide disables password auth and root login. These additional settings further reduce attack surface:
+
+```bash
+# Whitelist only the openclaw user — no other user can SSH in
+echo "AllowUsers openclaw" | sudo tee -a /etc/ssh/sshd_config
+
+# Disable SSH agent forwarding (prevents exploitation if someone gets a foothold)
+echo "AllowAgentForwarding no" | sudo tee -a /etc/ssh/sshd_config
+
+# Disable X11 forwarding (you're running a headless server, not a desktop)
+echo "X11Forwarding no" | sudo tee -a /etc/ssh/sshd_config
+
+sudo systemctl restart sshd
+```
+
+**What each does:**
+- `AllowUsers openclaw` — even if other users exist on the system, only `openclaw` can SSH in
+- `AllowAgentForwarding no` — prevents SSH agent forwarding, which could be exploited
+- `X11Forwarding no` — disables graphical session forwarding (unnecessary on a headless server)
+
+> **Note on SSH tunneling:** You may see guides recommend `PermitTunnel no` and `AllowTcpForwarding no` for further hardening. Be aware that the dashboard SSH tunnel (`ssh -N -L ...` from Phase 14) uses TCP port forwarding. If you set `AllowTcpForwarding no`, the dashboard tunnel will silently stop working. Only disable TCP forwarding if you plan to access the dashboard via direct Tailscale IP instead (see Phase 14).
+
+### Tailscale ACL Lockdown
+
+By default, every device on your Tailscale account can reach every other device on every port. That's fine initially, but you should tighten it.
+
+Go to https://login.tailscale.com/admin/acls and replace the default policy:
+
+```json
+{
+  "acls": [
+    {
+      "action": "accept",
+      "src":    ["autogroup:owner"],
+      "dst":    ["tag:server:22"]
+    }
+  ],
+  "tagOwners": {
+    "tag:server": ["autogroup:owner"]
+  }
+}
+```
+
+This says: only devices owned by the account owner can reach devices tagged `server`, and only on port 22 (SSH). Everything else is denied by default.
+
+After saving, tag your VPS in the Tailscale admin console as `tag:server`.
+
+> **Grants alternative:** Tailscale now recommends **grants** as the modern policy syntax. Check https://tailscale.com/kb/1324/acl-grants for details. The ACL example above continues to work — use whichever your tailnet is already set up with.
+
+Check https://tailscale.com/kb/1018/acls for more patterns. The key principle: deny everything by default, allow only what you need.
+
+---
+
 ## 🆘 TROUBLESHOOTING
 
 ### Real errors you'll actually hit:
@@ -477,10 +715,13 @@ If you want multiple bots (e.g., personal assistant + work agent):
 | `access not configured` in Telegram | Pairing not approved | `openclaw pairing approve telegram <CODE>` |
 | `prompt too large for the model` | Context overflow | `/reset` in chat, trim MEMORY.md |
 | `agents.list.X.model: Invalid input` | Bad model config format | Use `"primary": "anthropic/claude-opus-4-6"` |
-| `Failed to connect to bus` | systemd user session missing | Export XDG_RUNTIME_DIR (see Phase 9) |
+| `Failed to connect to bus` | systemd user session missing | Export XDG_RUNTIME_DIR (see Phase 10) |
 | `openclaw: command not found` | nvm not loaded | `source ~/.bashrc` then `nvm use 22` |
-| Bot doesn't respond | Multiple possible | Check logs (Phase 9), verify pairing, check `openclaw doctor` |
+| Bot doesn't respond | Multiple possible | Check logs (Phase 10), verify pairing, check `openclaw doctor` |
 | Telegram says "access not configured" | dmPolicy blocks you | Approve pairing or add your user ID to allowFrom |
+| Only one Telegram account starts | Account/binding mismatch | Check `channels.telegram.accounts` and `bindings` config |
+| Service doesn't survive reboot | Linger not enabled or XDG issue | `loginctl enable-linger openclaw`, set XDG vars |
+| Gateway accepts unauthenticated requests | Auth config didn't take | Re-check key path, restart, re-test (Phase 11) |
 
 ---
 
@@ -493,8 +734,13 @@ Keep these handy:
 ssh openclaw@TAILSCALE_IP
 
 # Service management
+openclaw gateway restart
 systemctl --user restart openclaw-gateway.service
 systemctl --user status openclaw-gateway.service --no-pager | head -n 25
+
+# If systemctl --user fails in SSH session
+export XDG_RUNTIME_DIR="/run/user/$(id -u)"
+export DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$(id -u)/bus"
 
 # Logs
 LATEST="$(ls -t /tmp/openclaw/openclaw-*.log | head -1)"
@@ -512,6 +758,9 @@ openclaw pairing approve telegram <CODE>
 # Cron management
 openclaw cron list
 openclaw cron add --name "task" --every 6h --message "Do X" --announce
+
+# Dashboard (from local machine)
+ssh -N -L 127.0.0.1:28789:127.0.0.1:18789 openclaw@TAILSCALE_IP
 
 # Context reset (in Telegram)
 /reset
@@ -544,6 +793,38 @@ openclaw cron add --name "task" --every 6h --message "Do X" --announce
 
 ---
 
+## 🔄 Update Procedure
+
+**Never just update and hope.** Back up first, update, verify.
+
+```bash
+# 1. Backup
+tar -czf ~/openclaw-backup-$(date +%F).tar.gz ~/.openclaw/
+
+# 2. Take a Hetzner snapshot (Console → Snapshots → Create)
+
+# 3. Upgrade CLI
+npm update -g openclaw
+
+# 4. Check config compatibility
+openclaw doctor
+
+# 5. Restart
+openclaw gateway restart
+systemctl --user status openclaw-gateway.service --no-pager | head -n 25
+
+# 6. Verify models
+openclaw models status --probe
+
+# 7. Check logs
+LATEST="$(ls -t /tmp/openclaw/openclaw-*.log | head -1)"
+tail -n 120 "$LATEST" | egrep -i 'telegram|pair|401|auth|error|Unknown model|listening'
+```
+
+If something broke, restore from your backup or rebuild from the Hetzner snapshot.
+
+---
+
 ## 📞 Need Help?
 
 - OpenClaw Discord: https://discord.gg/clawd (#users-helping-users)
@@ -560,9 +841,13 @@ openclaw cron add --name "task" --every 6h --message "Do X" --announce
 4. Lock down: UFW (Tailscale-only SSH), disable password auth, fail2ban
 5. Install nvm → Node.js 22 → OpenClaw CLI
 6. Run `openclaw onboard` → pick provider → paste API key → loopback mode
-7. Start gateway: `openclaw gateway restart` → verify systemd service
-8. Set up Telegram: @BotFather → token → config → approve pairing
-9. Turn on reasoning: `thinkingDefault: "high"`
-10. Lock secrets, run `openclaw doctor`, send first message
+7. **Validate locally: `openclaw chat` → `openclaw doctor`**
+8. **Lock secrets → migrate with SecretRefs**
+9. Start gateway: `openclaw gateway restart` → verify systemd service
+10. **Set up gateway auth → negative test to confirm rejection**
+11. Set up Telegram: @BotFather → token → config → approve pairing
+12. Turn on reasoning: `thinkingDefault: "high"`
+13. **Reboot test → Hetzner snapshot**
+14. Optional: Dashboard via SSH tunnel, SSH hardening extras, Tailscale ACL
 
 Done. Your AI assistant is live 24/7. 🦞
