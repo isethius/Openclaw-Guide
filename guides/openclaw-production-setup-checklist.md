@@ -106,7 +106,7 @@ PY
 - [ ] Add the bot token to your existing Telegram config structure in `~/.openclaw/openclaw.json`
 - [ ] Ensure `dmPolicy: "pairing"` is set (safest — requires approval on first message)
 
-> **If no Telegram config exists at all**, add a minimal block. Check `openclaw --help` or official docs for the current expected shape — it may be a flat `botToken` field or an `accounts`-based structure depending on your version.
+> **If no Telegram config exists at all**, check `openclaw --help` or official docs for the current expected shape. We recommend the account-based structure — it scales cleanly to multi-bot setups later (see Multi-Agent Setup below). The flat `botToken` shape may also work in some versions, but account-based is the safer default for production.
 
 **Step 3: Restart and pair.**
 
@@ -377,8 +377,8 @@ htop
     }
   },
   bindings: [
-    { agentId: "main", match: { channel: "telegram", account: "default" } },
-    { agentId: "work", match: { channel: "telegram", account: "work" } }
+    { agentId: "main", match: { channel: "telegram", accountId: "default" } },
+    { agentId: "work", match: { channel: "telegram", accountId: "work" } }
   ]
 }
 ```

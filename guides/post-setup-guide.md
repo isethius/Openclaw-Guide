@@ -149,8 +149,8 @@ In production, you'll likely run multiple Telegram bots for different agents:
     }
   },
   bindings: [
-    { agentId: "main", match: { channel: "telegram", account: "default" } },
-    { agentId: "travel", match: { channel: "telegram", account: "travel" } }
+    { agentId: "main", match: { channel: "telegram", accountId: "default" } },
+    { agentId: "travel", match: { channel: "telegram", accountId: "travel" } }
   ]
 }
 ```

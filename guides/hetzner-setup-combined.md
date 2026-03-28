@@ -459,8 +459,8 @@ If you want multiple bots (e.g., personal assistant + work agent):
     }
   },
   bindings: [
-    { agentId: "main", match: { channel: "telegram", account: "default" } },
-    { agentId: "work", match: { channel: "telegram", account: "work" } }
+    { agentId: "main", match: { channel: "telegram", accountId: "default" } },
+    { agentId: "work", match: { channel: "telegram", accountId: "work" } }
   ]
 }
 ```

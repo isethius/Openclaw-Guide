@@ -12,7 +12,7 @@ Think of it like having a personal ChatGPT that:
 - Runs 24/7 on your own VPS
 - Connects to YOUR apps and services
 - Has persistent memory across conversations
-- Can run tasks in the background while you sleep
+- Can run scheduled tasks via cron and heartbeat while you're away
 - You fully control — your data stays on your machine
 
 ## 📚 Guides
@@ -26,7 +26,7 @@ Think of it like having a personal ChatGPT that:
 
 ## 🧠 Agent Workspace Files
 
-These files are what make your AI assistant "you." They're loaded every session:
+These are the workspace conventions used in this guide. OpenClaw loads files from `~/.openclaw/workspace/` each session — the specific filenames below are our recommended setup, not hard product requirements:
 
 | File | Purpose |
 |------|---------|
