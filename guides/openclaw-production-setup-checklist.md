@@ -371,7 +371,7 @@ htop
 - Separate API keys for each client environment
 - Each agent gets its own workspace (`~/.openclaw/workspace-<agent>/`)
 - Per-agent config in `~/.openclaw/agents/<agent-id>/`
-- Use `openclaw agents add <name>` to create new agents
+- Use the current agent-creation command for your installed version (e.g. `openclaw agents add <name>` if available)
 
 **Multi-agent routing depends on Telegram accounts + bindings + pairing per bot/account:**
 
