@@ -85,7 +85,7 @@ openclaw models status --probe
 
 **Step 1: Inspect your existing config before editing anything.**
 
-The onboarding wizard may have already created a Telegram block. The config shape varies between versions — some use a flat `botToken` field, others use an `accounts`-based structure. Do not blindly paste a schema from a guide.
+The onboarding wizard may have already created a Telegram block. Do not blindly paste a schema from a guide.
 
 ```bash
 python3 - <<'PY'
@@ -98,15 +98,30 @@ PY
 ```
 
 - If the output shows an existing Telegram config, **work within that structure** — add your bot token and set `dmPolicy` where the existing shape expects them.
-- If the output is `None`, you need to add Telegram config manually (see below).
+- If the output is `None`, you need to add Telegram config manually (see Step 2).
 
 **Step 2: Create your bot and add the token.**
 
 - [ ] Create bot via @BotFather → get token
-- [ ] Add the bot token to your existing Telegram config structure in `~/.openclaw/openclaw.json`
-- [ ] Ensure `dmPolicy: "pairing"` is set (safest — requires approval on first message)
 
-> **If no Telegram config exists at all**, check `openclaw --help` or official docs for the current expected shape. We recommend the account-based structure — it scales cleanly to multi-bot setups later (see Multi-Agent Setup below). The flat `botToken` shape may also work in some versions, but account-based is the safer default for production.
+Follow the structure already present instead of blindly replacing the Telegram block.
+
+For production, prefer the account-based Telegram structure, even if you are starting with only one bot. This keeps single-bot and multi-bot setups consistent and makes later expansion safer:
+
+```json5
+{
+  channels: {
+    telegram: {
+      accounts: {
+        default: {
+          botToken: "YOUR_TOKEN",
+          dmPolicy: "pairing"  // safest — requires approval on first message
+        }
+      }
+    }
+  }
+}
+```
 
 **Step 3: Restart and pair.**
 
