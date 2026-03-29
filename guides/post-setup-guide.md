@@ -35,7 +35,7 @@ When your primary model hits rate limits, you need a backup or your agent goes s
 }
 ```
 
-**Important:** If using Codex as fallback, the OAuth token expires every ~10 days. Set up a weekly cron to refresh it, or you'll discover it's dead at the worst possible moment.
+**Important:** If using Codex as fallback, Codex-backed auth can expire and should be monitored or refreshed proactively. Set up a periodic check or refresh cron rather than discovering it's dead at the worst possible moment. See [CLI Subscription Auth & Coding Tool Paths](cli-subscription-auth.md) for details on the shared auth dependency.
 
 ### 3. Verify Service Management
 

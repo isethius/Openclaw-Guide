@@ -498,7 +498,7 @@ sudo apt install -y jq yq htop iotop curl bc
 
 - OpenClaw Discord: https://discord.gg/clawd
 - ClawHub (skills): https://clawhub.com
-- Official docs: https://docs.openclaw.com
+- Official docs: https://docs.openclaw.ai
 
 ---
 
