@@ -22,6 +22,7 @@ Think of it like having a personal ChatGPT that:
 
 ### After Setup
 - **[Post-Setup Guide](guides/post-setup-guide.md)** — Operational knowledge: Telegram architecture, memory hygiene, dashboard access, troubleshooting, and everything we learned running OpenClaw in production
+- **[CLI Subscription Auth & Coding Tool Paths](guides/cli-subscription-auth.md)** — Codex CLI, Claude Code CLI, API model inference, and how they differ
 - **[Production Setup Checklist](guides/openclaw-production-setup-checklist.md)** — Battle-tested checklist for client deployments
 
 ## 🧠 Agent Workspace Files

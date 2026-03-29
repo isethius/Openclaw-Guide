@@ -286,6 +286,12 @@ openclaw doctor
 
 Run both after any change to model config, API keys, or auth profiles.
 
+### CLI Coding Tools vs API Model Inference
+
+If your agent uses CLI coding tools (Codex CLI, Claude Code CLI), understand that **CLI tool execution and API model inference are completely different mechanisms** with separate auth, separate failure modes, and separate verification steps. Don't confuse a model fallback string with a CLI binary invocation.
+
+→ See **[CLI Subscription Auth & Coding Tool Paths](cli-subscription-auth.md)** for the full breakdown.
+
 ---
 
 ## ⏰ Automation — Cron vs Heartbeat

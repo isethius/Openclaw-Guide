@@ -827,6 +827,7 @@ ssh -N -L 127.0.0.1:28789:127.0.0.1:18789 openclaw@TAILSCALE_IP
 - Customize your agent's personality through `SOUL.md`, `IDENTITY.md`, and `USER.md` in the workspace
 - **Don't auto-update OpenClaw** — update manually, test, confirm nothing broke
 - **Take a backup before every update** — see Update Procedure below
+- **Using Codex CLI or Claude Code for coding tasks?** — See [CLI Subscription Auth & Coding Tool Paths](cli-subscription-auth.md) for auth setup, verification, and the difference between CLI execution and API model inference
 
 ---
 
